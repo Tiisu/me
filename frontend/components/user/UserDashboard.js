@@ -11,10 +11,12 @@ import api from '@/services/api';
 export default function UserDashboard() {
   const {
     currentAccount,
+    wasteVanContract,
     wasteVanTokenContract,
     getUserTokenBalance,
     getWasteReportsByStatus,
-    user
+    user,
+    connectWallet
   } = useContext(EcoConnectContext);
 
   const [tokenBalance, setTokenBalance] = useState(null);
@@ -24,42 +26,96 @@ export default function UserDashboard() {
   const [wasteReports, setWasteReports] = useState([]);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState('overview');
+  const [contractError, setContractError] = useState(false);
 
   useEffect(() => {
-    const fetchUserData = async () => {
-      if (!currentAccount) return;
+    // Check if user is authenticated
+    const isAuthenticated = user && localStorage.getItem('token');
+    console.log('UserDashboard - Authentication check:', {
+      isAuthenticated,
+      user: user ? 'exists' : 'null',
+      currentAccount: currentAccount ? 'connected' : 'not connected',
+      contract: wasteVanContract ? 'initialized' : 'not initialized'
+    });
 
+    // Try to reconnect wallet if contract is not initialized but account is connected
+    if (currentAccount && !wasteVanContract) {
+      console.log('Wallet connected but contract not initialized, attempting to reconnect...');
+      setContractError(true);
+
+      // Try to reconnect wallet
+      if (window.ethereum) {
+        window.ethereum.request({ method: 'eth_accounts' })
+          .then(accounts => {
+            if (accounts.length > 0) {
+              console.log('Found connected account, reconnecting wallet...');
+              connectWallet()
+                .then(() => {
+                  console.log('Wallet reconnected successfully');
+                  setContractError(false);
+                })
+                .catch(error => {
+                  console.error('Failed to reconnect wallet:', error);
+                });
+            }
+          })
+          .catch(error => {
+            console.error('Failed to check connected accounts:', error);
+          });
+      }
+    }
+
+    const fetchUserData = async () => {
       try {
         setLoading(true);
 
-        // Fetch token balance
-        const balance = await getUserTokenBalance(currentAccount);
-        setTokenBalance(balance);
+        // Fetch blockchain data if wallet is connected
+        if (currentAccount) {
+          console.log('Fetching blockchain data for account:', currentAccount);
 
-        // Fetch waste statistics
-        const reportedCount = await getWasteReportsByStatus(0, 100, 0);
-        const collectedCount = await getWasteReportsByStatus(1, 100, 0);
-        const processedCount = await getWasteReportsByStatus(2, 100, 0);
+          // Fetch token balance
+          try {
+            const balance = await getUserTokenBalance(currentAccount);
+            setTokenBalance(balance);
+            console.log('Token balance fetched:', balance.toString());
+          } catch (error) {
+            console.error('Failed to fetch token balance:', error);
+          }
 
-        setReportedWaste(reportedCount.length);
-        setCollectedWaste(collectedCount.length);
-        setProcessedWaste(processedCount.length);
+          // Fetch waste statistics
+          try {
+            const reportedCount = await getWasteReportsByStatus(0, 100, 0);
+            const collectedCount = await getWasteReportsByStatus(1, 100, 0);
+            const processedCount = await getWasteReportsByStatus(2, 100, 0);
 
-        // Combine all reports for history
-        const allReports = [...reportedCount, ...collectedCount, ...processedCount];
+            setReportedWaste(reportedCount.length);
+            setCollectedWaste(collectedCount.length);
+            setProcessedWaste(processedCount.length);
 
-        // Sort by report time (newest first)
-        allReports.sort((a, b) => b.reportTime - a.reportTime);
+            // Combine all reports for history
+            const allReports = [...reportedCount, ...collectedCount, ...processedCount];
 
-        setWasteReports(allReports);
+            // Sort by report time (newest first)
+            allReports.sort((a, b) => b.reportTime - a.reportTime);
+
+            setWasteReports(allReports);
+            console.log('Blockchain waste reports fetched:', allReports.length);
+          } catch (error) {
+            console.error('Failed to fetch blockchain waste reports:', error);
+          }
+        } else {
+          console.log('No wallet connected, skipping blockchain data fetch');
+        }
 
         // Also fetch from backend if user is logged in
-        if (user) {
+        if (isAuthenticated) {
+          console.log('Fetching backend data for user:', user.username);
           try {
             const response = await api.user.getWasteReports();
+            console.log('Backend waste reports response:', response);
+
             if (response.reports && response.reports.length > 0) {
               // Merge blockchain and backend data
-              // This is a simplified approach - in a real app, you'd want to match by IDs
               setWasteReports(prev => {
                 const combined = [...prev];
                 response.reports.forEach(backendReport => {
@@ -80,10 +136,13 @@ export default function UserDashboard() {
                   return timeA - timeB;
                 });
               });
+              console.log('Combined waste reports:', wasteReports.length);
             }
           } catch (error) {
             console.error('Failed to fetch backend waste reports:', error);
           }
+        } else {
+          console.log('User not authenticated with backend, skipping backend data fetch');
         }
 
       } catch (error) {
@@ -94,7 +153,7 @@ export default function UserDashboard() {
     };
 
     fetchUserData();
-  }, [currentAccount, getUserTokenBalance, getWasteReportsByStatus, user]);
+  }, [currentAccount, wasteVanContract, getUserTokenBalance, getWasteReportsByStatus, user, connectWallet]);
 
   // Helper function to format date from timestamp
   const formatDate = (timestamp) => {
@@ -175,6 +234,26 @@ export default function UserDashboard() {
   return (
     <div className="space-y-8">
       <h1 className="text-3xl font-bold">User Dashboard</h1>
+
+      {contractError && (
+        <div className="bg-yellow-50 border border-yellow-200 rounded-md p-4 mb-6">
+          <div className="flex items-center">
+            <AlertCircle className="h-5 w-5 text-yellow-600 mr-3" />
+            <div>
+              <h3 className="text-sm font-medium text-yellow-800">Blockchain Connection Issue</h3>
+              <p className="text-sm text-yellow-700 mt-1">
+                There was an issue connecting to the blockchain. Some features may not work properly.
+                <button
+                  onClick={() => connectWallet()}
+                  className="ml-2 text-yellow-800 underline hover:text-yellow-900"
+                >
+                  Reconnect Wallet
+                </button>
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
 
       {loading ? (
         <div className="flex justify-center py-8">

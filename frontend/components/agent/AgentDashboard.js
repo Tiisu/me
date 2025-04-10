@@ -1,9 +1,8 @@
 'use client';
 
 import React, { useState, useEffect, useContext } from 'react';
-import { Loader2, Coins, BarChart3, QrCode } from 'lucide-react';
+import { Loader2, Coins, BarChart3, QrCode, AlertCircle } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { EcoConnectContext } from '@/context/EcoConnect';
 import { ethers } from 'ethers';
 import { AgentStatus } from '@/context/Constants';
@@ -16,13 +15,50 @@ export default function AgentDashboard() {
     wasteVanContract,
     getAgentStats,
     agentStatus,
-    isAgent
+    isAgent,
+    connectWallet
   } = useContext(EcoConnectContext);
 
   const [stats, setStats] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [activeTab, setActiveTab] = useState('collect');
+  const [contractError, setContractError] = useState(false);
 
   useEffect(() => {
+    console.log('AgentDashboard - Checking contract status:', {
+      currentAccount: currentAccount ? 'connected' : 'not connected',
+      contract: wasteVanContract ? 'initialized' : 'not initialized',
+      isAgent,
+      agentStatus
+    });
+
+    // Try to reconnect wallet if contract is not initialized but account is connected
+    if (currentAccount && !wasteVanContract) {
+      console.log('Wallet connected but contract not initialized, attempting to reconnect...');
+      setContractError(true);
+
+      // Try to reconnect wallet
+      if (window.ethereum) {
+        window.ethereum.request({ method: 'eth_accounts' })
+          .then(accounts => {
+            if (accounts.length > 0) {
+              console.log('Found connected account, reconnecting wallet...');
+              connectWallet()
+                .then(() => {
+                  console.log('Wallet reconnected successfully');
+                  setContractError(false);
+                })
+                .catch(error => {
+                  console.error('Failed to reconnect wallet:', error);
+                });
+            }
+          })
+          .catch(error => {
+            console.error('Failed to check connected accounts:', error);
+          });
+      }
+    }
+
     const fetchAgentData = async () => {
       if (!currentAccount || !isAgent) return;
 
@@ -41,7 +77,7 @@ export default function AgentDashboard() {
     };
 
     fetchAgentData();
-  }, [currentAccount, isAgent, getAgentStats]);
+  }, [currentAccount, wasteVanContract, isAgent, agentStatus, getAgentStats, connectWallet]);
 
   if (!isAgent) {
     return (
@@ -69,6 +105,26 @@ export default function AgentDashboard() {
   return (
     <div className="space-y-8">
       <h1 className="text-3xl font-bold">Agent Dashboard</h1>
+
+      {contractError && (
+        <div className="bg-yellow-50 border border-yellow-200 rounded-md p-4 mb-6">
+          <div className="flex items-center">
+            <AlertCircle className="h-5 w-5 text-yellow-600 mr-3" />
+            <div>
+              <h3 className="text-sm font-medium text-yellow-800">Blockchain Connection Issue</h3>
+              <p className="text-sm text-yellow-700 mt-1">
+                There was an issue connecting to the blockchain. Some features may not work properly.
+                <button
+                  onClick={() => connectWallet()}
+                  className="ml-2 text-yellow-800 underline hover:text-yellow-900"
+                >
+                  Reconnect Wallet
+                </button>
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
 
       {loading ? (
         <div className="flex justify-center py-8">
@@ -135,26 +191,38 @@ export default function AgentDashboard() {
             </Card>
           </div>
 
-          <Tabs defaultValue="collect">
-            <TabsList className="grid w-full grid-cols-2">
-              <TabsTrigger value="collect">Collect Waste</TabsTrigger>
-              <TabsTrigger value="process">Process Waste</TabsTrigger>
-            </TabsList>
-            <TabsContent value="collect" className="mt-6">
-              <Card>
-                <CardContent className="p-6">
-                  <CollectWasteForm />
-                </CardContent>
-              </Card>
-            </TabsContent>
-            <TabsContent value="process" className="mt-6">
-              <Card>
-                <CardContent className="p-6">
-                  <ProcessWasteForm />
-                </CardContent>
-              </Card>
-            </TabsContent>
-          </Tabs>
+          {/* Tab Navigation */}
+          <div className="flex space-x-2 mb-6">
+            <button
+              onClick={() => setActiveTab('collect')}
+              className={`px-4 py-2 rounded-md ${activeTab === 'collect' ? 'bg-green-600 text-white' : 'bg-gray-100'}`}
+            >
+              Collect Waste
+            </button>
+            <button
+              onClick={() => setActiveTab('process')}
+              className={`px-4 py-2 rounded-md ${activeTab === 'process' ? 'bg-green-600 text-white' : 'bg-gray-100'}`}
+            >
+              Process Waste
+            </button>
+          </div>
+
+          {/* Tab Content */}
+          {activeTab === 'collect' && (
+            <Card>
+              <CardContent className="p-6">
+                <CollectWasteForm />
+              </CardContent>
+            </Card>
+          )}
+
+          {activeTab === 'process' && (
+            <Card>
+              <CardContent className="p-6">
+                <ProcessWasteForm />
+              </CardContent>
+            </Card>
+          )}
         </>
       )}
     </div>

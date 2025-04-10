@@ -31,13 +31,22 @@ const Login = () => {
 
   // Check if already connected and registered
   useEffect(() => {
+    // Create a flag to prevent multiple redirects
+    let isRedirecting = false;
+
     const checkUserStatus = async () => {
-      console.log('Checking user status:', {
+      console.log('LoginRegister - Checking user status:', {
         user: user ? 'exists' : 'null',
         token: localStorage.getItem('token') ? 'exists' : 'null',
         currentAccount,
         isRegistered
       });
+
+      // If already redirecting, don't do anything
+      if (isRedirecting) {
+        console.log('Already redirecting, skipping check');
+        return;
+      }
 
       // If user is already logged in with valid token, redirect to dashboard
       if (user && localStorage.getItem('token')) {
@@ -46,6 +55,7 @@ const Login = () => {
           // Check if the user object has the required fields
           if (user.email && user.userType) {
             console.log('User is authenticated, redirecting to dashboard');
+            isRedirecting = true;
             router.push(user.userType === 'agent' ? '/agentDashboard' : '/userDashboard');
             return;
           } else {
@@ -59,7 +69,7 @@ const Login = () => {
           localStorage.removeItem('token');
         }
       } else {
-        console.log('User is not authenticated');
+        console.log('User is not authenticated with backend');
       }
 
       // If wallet is connected and registered on blockchain, but not in backend
@@ -71,6 +81,11 @@ const Login = () => {
     };
 
     checkUserStatus();
+
+    // Cleanup function to prevent memory leaks
+    return () => {
+      isRedirecting = true; // Prevent any further redirects if component unmounts
+    };
   }, [currentAccount, wasteVanContract, isRegistered, isAgent, router, user]);
 
   const handleChange = (e) => {

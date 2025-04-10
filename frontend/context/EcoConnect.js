@@ -60,39 +60,61 @@ export const EcoConnectProvider = ({ children }) => {
   // Check if user is already authenticated
   useEffect(() => {
     const checkAuthentication = async () => {
+      console.log('EcoConnect - Checking authentication');
       // Check for token in localStorage
       const savedToken = localStorage.getItem('token');
       const savedUser = localStorage.getItem('user');
 
       if (savedToken && savedUser) {
-        setToken(savedToken);
-        setUser(JSON.parse(savedUser));
+        console.log('Found saved token and user in localStorage');
+        try {
+          const userData = JSON.parse(savedUser);
 
-        // Set user type and registration status based on saved user
-        const userData = JSON.parse(savedUser);
-        setUserType(userData.userType);
-        setIsRegistered(true);
-        setIsAgent(userData.userType === 'agent');
-        if (userData.userType === 'agent') {
-          setAgentStatus(userData.agentStatus);
-        }
-
-        // If user has wallet address, check blockchain status
-        if (userData.walletAddress && window.ethereum) {
-          try {
-            const accounts = await window.ethereum.request({ method: 'eth_accounts' });
-            if (accounts.length > 0 && accounts[0].toLowerCase() === userData.walletAddress.toLowerCase()) {
-              await connectWalletInternal(accounts[0]);
-            }
-          } catch (error) {
-            console.error("Failed to check wallet connection:", error);
+          // Validate user data
+          if (!userData.email || !userData.userType) {
+            console.error('Invalid user data in localStorage');
+            localStorage.removeItem('user');
+            localStorage.removeItem('token');
+            return;
           }
+
+          setToken(savedToken);
+          setUser(userData);
+
+          // Set user type and registration status based on saved user
+          setUserType(userData.userType);
+          setIsRegistered(true);
+          setIsAgent(userData.userType === 'agent');
+          if (userData.userType === 'agent') {
+            setAgentStatus(userData.agentStatus);
+          }
+
+          console.log('User authenticated from localStorage:', userData.email);
+
+          // If user has wallet address, check blockchain status
+          if (userData.walletAddress && window.ethereum) {
+            try {
+              const accounts = await window.ethereum.request({ method: 'eth_accounts' });
+              if (accounts.length > 0 && accounts[0].toLowerCase() === userData.walletAddress.toLowerCase()) {
+                console.log('Connecting wallet that matches user account');
+                await connectWalletInternal(accounts[0]);
+              }
+            } catch (error) {
+              console.error("Failed to check wallet connection:", error);
+            }
+          }
+        } catch (error) {
+          console.error('Error parsing user data from localStorage:', error);
+          localStorage.removeItem('user');
+          localStorage.removeItem('token');
         }
       } else if (window.ethereum) {
         // If no token but wallet is connected, just connect wallet
+        console.log('No saved authentication, checking for connected wallet');
         try {
           const accounts = await window.ethereum.request({ method: 'eth_accounts' });
           if (accounts.length > 0) {
+            console.log('Found connected wallet:', accounts[0]);
             await connectWalletInternal(accounts[0]);
           }
         } catch (error) {
@@ -445,11 +467,49 @@ export const EcoConnectProvider = ({ children }) => {
   const reportWaste = async (plasticType, quantityInGrams, qrCodeHash) => {
     try {
       setLoading(true);
-      if (!wasteVanContract) throw new Error("Contract not initialized");
-      if (!isRegistered) throw new Error("User not registered");
 
+      // Check if contract is initialized
+      if (!wasteVanContract) {
+        console.error("Contract not initialized. Attempting to reconnect wallet...");
+
+        // Try to reconnect wallet if ethereum is available
+        if (window.ethereum) {
+          try {
+            const accounts = await window.ethereum.request({ method: 'eth_accounts' });
+            if (accounts.length > 0) {
+              await connectWalletInternal(accounts[0]);
+
+              // Check if contract is now initialized
+              if (!wasteVanContract) {
+                throw new Error("Contract not initialized. Please reconnect your wallet.");
+              }
+            } else {
+              throw new Error("No wallet connected. Please connect your wallet first.");
+            }
+          } catch (reconnectError) {
+            console.error("Failed to reconnect wallet:", reconnectError);
+            throw new Error("Contract not initialized. Please reconnect your wallet.");
+          }
+        } else {
+          throw new Error("MetaMask not installed. Please install MetaMask to use this feature.");
+        }
+      }
+
+      // Check if user is registered
+      if (!isRegistered) {
+        throw new Error("User not registered. Please register before reporting waste.");
+      }
+
+      console.log('Reporting waste with parameters:', { plasticType, quantityInGrams, qrCodeHash });
+
+      // Call the contract function
       const tx = await wasteVanContract.reportWaste(plasticType, quantityInGrams, qrCodeHash);
-      await tx.wait();
+      console.log('Transaction submitted:', tx.hash);
+
+      // Wait for transaction confirmation
+      const receipt = await tx.wait();
+      console.log('Transaction confirmed:', receipt);
+
       return true;
     } catch (error) {
       console.error("Failed to report waste:", error);

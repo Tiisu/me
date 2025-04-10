@@ -10,8 +10,14 @@ import { EcoConnectContext } from '@/context/EcoConnect';
 import { PlasticType } from '@/context/Constants';
 
 export default function ReportWasteForm() {
-  const { reportWaste, loading: contextLoading } = useContext(EcoConnectContext);
-  
+  const {
+    reportWaste,
+    loading: contextLoading,
+    wasteVanContract,
+    currentAccount,
+    isRegistered
+  } = useContext(EcoConnectContext);
+
   const [formData, setFormData] = useState({
     plasticType: '',
     quantity: '',
@@ -20,7 +26,11 @@ export default function ReportWasteForm() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState(false);
-  
+
+  // Check if contract is initialized
+  const isContractInitialized = Boolean(wasteVanContract);
+  const canReportWaste = isContractInitialized && currentAccount && isRegistered;
+
   const plasticTypes = [
     { value: PlasticType.PET, label: 'PET (Polyethylene Terephthalate)' },
     { value: PlasticType.HDPE, label: 'HDPE (High-Density Polyethylene)' },
@@ -30,67 +40,89 @@ export default function ReportWasteForm() {
     { value: PlasticType.PS, label: 'PS (Polystyrene)' },
     { value: PlasticType.Other, label: 'Other Plastics' }
   ];
-  
+
   const handleChange = (field, value) => {
     setFormData({
       ...formData,
       [field]: value
     });
   };
-  
+
   const generateQRCodeHash = () => {
     // Generate a random hash for the QR code
     const timestamp = Date.now().toString();
     const randomString = Math.random().toString(36).substring(2, 15);
     return `${timestamp}-${randomString}`;
   };
-  
+
   const handleSubmit = async (e) => {
     e.preventDefault();
-    
+
     if (loading || contextLoading) return;
-    
+
+    // Check if contract is initialized
+    if (!isContractInitialized) {
+      setError('Wallet not connected or blockchain not available. Please connect your wallet first.');
+      return;
+    }
+
+    // Check if user is registered
+    if (!isRegistered) {
+      setError('You need to register before reporting waste.');
+      return;
+    }
+
     // Validate form
     if (!formData.plasticType) {
       setError('Please select a plastic type');
       return;
     }
-    
+
     if (!formData.quantity || isNaN(formData.quantity) || parseInt(formData.quantity) <= 0) {
       setError('Please enter a valid quantity in grams');
       return;
     }
-    
+
     setLoading(true);
     setError('');
     setSuccess(false);
-    
+
     try {
+      console.log('Reporting waste with contract:', wasteVanContract ? 'initialized' : 'not initialized');
+
       // Generate QR code hash if not provided
       const qrCodeHash = formData.qrCodeHash || generateQRCodeHash();
-      
+
       // Call the contract function
       await reportWaste(
         parseInt(formData.plasticType),
         parseInt(formData.quantity),
         qrCodeHash
       );
-      
+
       setSuccess(true);
       setFormData({
         plasticType: '',
         quantity: '',
         qrCodeHash: ''
       });
-      
+
     } catch (error) {
       console.error('Failed to report waste:', error);
-      setError(error.message || 'Failed to report waste. Please try again.');
+      if (error.message.includes('Contract not initialized')) {
+        setError('Wallet connection issue. Please reconnect your wallet and try again.');
+      } else if (error.message.includes('User not registered')) {
+        setError('You need to register before reporting waste.');
+      } else if (error.message.includes('user rejected transaction')) {
+        setError('Transaction was rejected. Please try again.');
+      } else {
+        setError(error.message || 'Failed to report waste. Please try again.');
+      }
     } finally {
       setLoading(false);
     }
   };
-  
+
   return (
     <div className="space-y-6">
       <div className="text-center">
@@ -99,14 +131,14 @@ export default function ReportWasteForm() {
           Report your plastic waste collection to earn rewards
         </p>
       </div>
-      
+
       {error && (
         <Alert variant="destructive">
           <AlertCircle className="h-4 w-4" />
           <AlertDescription>{error}</AlertDescription>
         </Alert>
       )}
-      
+
       {success && (
         <Alert className="bg-green-50 border-green-200">
           <AlertDescription className="text-green-700">
@@ -114,12 +146,12 @@ export default function ReportWasteForm() {
           </AlertDescription>
         </Alert>
       )}
-      
+
       <form onSubmit={handleSubmit} className="space-y-4">
         <div className="space-y-2">
           <label className="text-sm font-medium">Plastic Type</label>
-          <Select 
-            value={formData.plasticType} 
+          <Select
+            value={formData.plasticType}
             onValueChange={(value) => handleChange('plasticType', value)}
           >
             <SelectTrigger>
@@ -134,7 +166,7 @@ export default function ReportWasteForm() {
             </SelectContent>
           </Select>
         </div>
-        
+
         <div className="space-y-2">
           <label className="text-sm font-medium">Quantity (grams)</label>
           <Input
@@ -145,17 +177,31 @@ export default function ReportWasteForm() {
             min="1"
           />
         </div>
-        
+
+        {!canReportWaste && (
+          <Alert className="mb-4 bg-yellow-50 border-yellow-200">
+            <AlertDescription className="text-yellow-700">
+              {!currentAccount
+                ? 'Please connect your wallet to report waste.'
+                : !isRegistered
+                  ? 'You need to register before reporting waste.'
+                  : 'Blockchain connection issue. Please refresh the page.'}
+            </AlertDescription>
+          </Alert>
+        )}
+
         <Button
           type="submit"
           className="w-full"
-          disabled={loading || contextLoading}
+          disabled={loading || contextLoading || !canReportWaste}
         >
           {loading || contextLoading ? (
             <span className="flex items-center">
               <Loader2 className="mr-2 h-4 w-4 animate-spin" />
               Reporting...
             </span>
+          ) : !canReportWaste ? (
+            "Connect Wallet to Report"
           ) : (
             "Report Waste"
           )}
