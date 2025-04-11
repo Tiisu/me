@@ -104,9 +104,16 @@ export default function UserDashboard() {
 
           // Fetch waste statistics
           try {
+            console.log('Fetching waste reports by status...');
             const reportedCount = await getWasteReportsByStatus(0, 100, 0);
             const collectedCount = await getWasteReportsByStatus(1, 100, 0);
             const processedCount = await getWasteReportsByStatus(2, 100, 0);
+
+            console.log('Waste reports counts:', {
+              reported: reportedCount.length,
+              collected: collectedCount.length,
+              processed: processedCount.length
+            });
 
             setReportedWaste(reportedCount.length);
             setCollectedWaste(collectedCount.length);
@@ -115,8 +122,37 @@ export default function UserDashboard() {
             // Combine all reports for history
             const allReports = [...reportedCount, ...collectedCount, ...processedCount];
 
-            // Sort by report time (newest first)
-            allReports.sort((a, b) => b.reportTime - a.reportTime);
+            // Log some sample reports for debugging
+            if (allReports.length > 0) {
+              console.log('Sample waste report:', {
+                ...allReports[0],
+                reportTime: allReports[0].reportTime.toString(),
+                quantity: allReports[0].quantity.toString(),
+                plasticType: allReports[0].plasticType.toString()
+              });
+            }
+
+            // Sort by report time (newest first) - using our safe sorting function
+            allReports.sort((a, b) => {
+              try {
+                // Convert timestamps to numbers, handling BigInt if needed
+                const getTimeValue = (item) => {
+                  if (item.reportTime) {
+                    return typeof item.reportTime === 'bigint'
+                      ? Number(item.reportTime)
+                      : Number(item.reportTime);
+                  }
+                  return 0;
+                };
+
+                const timeA = getTimeValue(b); // Note: b first for descending order
+                const timeB = getTimeValue(a);
+                return timeA - timeB;
+              } catch (error) {
+                console.error('Error sorting waste reports:', error);
+                return 0;
+              }
+            });
 
             setWasteReports(allReports);
             console.log('Blockchain waste reports fetched:', allReports.length);
@@ -129,25 +165,41 @@ export default function UserDashboard() {
 
         // Also fetch from backend if user is logged in
         if (isAuthenticated) {
-          console.log('Fetching backend data for user:', user.username);
+          console.log('Fetching backend data for user:', user.email || user.username);
           try {
             const response = await api.user.getWasteReports();
             console.log('Backend waste reports response:', response);
 
             if (response.reports && response.reports.length > 0) {
+              console.log(`Received ${response.reports.length} reports from backend`);
+
+              // Log a sample backend report for debugging
+              if (response.reports.length > 0) {
+                console.log('Sample backend report:', response.reports[0]);
+              }
+
               // Merge blockchain and backend data
               setWasteReports(prev => {
+                console.log(`Merging ${prev.length} blockchain reports with ${response.reports.length} backend reports`);
+
                 const combined = [...prev];
                 response.reports.forEach(backendReport => {
                   // Check if report already exists in the array
                   const exists = combined.some(r => r.qrCodeHash === backendReport.qrCodeHash);
                   if (!exists) {
-                    combined.push({
+                    // Convert backend report to match blockchain format
+                    const formattedReport = {
                       ...backendReport,
                       // Convert backend status to blockchain status
                       status: backendReport.status === 'reported' ? 0 :
-                             backendReport.status === 'collected' ? 1 : 2
-                    });
+                             backendReport.status === 'collected' ? 1 : 2,
+                      // Ensure reportTime is a number
+                      reportTime: backendReport.reportTime || new Date(backendReport.createdAt).getTime() / 1000,
+                      // Ensure quantity is a number
+                      quantity: Number(backendReport.quantity) || 0
+                    };
+
+                    combined.push(formattedReport);
                   }
                 });
                 return combined.sort((a, b) => {

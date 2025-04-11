@@ -557,13 +557,38 @@ export const EcoConnectProvider = ({ children }) => {
 
   const getWasteReportsByStatus = async (status, limit = 10, offset = 0) => {
     try {
-      if (!wasteVanContract) throw new Error("Contract not initialized");
+      if (!wasteVanContract) {
+        console.error("Contract not initialized when fetching waste reports");
+        throw new Error("Contract not initialized");
+      }
 
+      console.log(`Calling contract.getWasteReportsByStatus(${status}, ${limit}, ${offset})`);
       const reports = await wasteVanContract.getWasteReportsByStatus(status, limit, offset);
+      console.log(`Received ${reports.length} reports for status ${status}`);
+
+      // If we have reports, log the first one for debugging
+      if (reports.length > 0) {
+        try {
+          const sampleReport = reports[0];
+          console.log('Sample report data structure:', {
+            reportId: sampleReport.reportId?.toString() || 'N/A',
+            reporter: sampleReport.reporter?.substring(0, 10) + '...' || 'N/A',
+            reportTime: sampleReport.reportTime?.toString() || 'N/A',
+            plasticType: sampleReport.plasticType?.toString() || 'N/A',
+            quantity: sampleReport.quantity?.toString() || 'N/A',
+            status: sampleReport.status?.toString() || 'N/A',
+            qrCodeHash: sampleReport.qrCodeHash?.substring(0, 10) + '...' || 'N/A'
+          });
+        } catch (logError) {
+          console.error('Error logging sample report:', logError);
+        }
+      }
+
       return reports;
     } catch (error) {
       console.error("Failed to get waste reports:", error);
-      throw error;
+      // Return empty array instead of throwing to prevent UI crashes
+      return [];
     }
   };
 
