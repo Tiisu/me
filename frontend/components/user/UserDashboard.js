@@ -119,12 +119,31 @@ export default function UserDashboard() {
               processed: processedCount.length
             });
 
-            setReportedWaste(reportedCount.length);
-            setCollectedWaste(collectedCount.length);
-            setProcessedWaste(processedCount.length);
+            // Filter reports to only show the current user's reports
+            const filterReportsByCurrentUser = (reports) => {
+              return reports.filter(report => {
+                // Check if the report belongs to the current user
+                return report.reporter && report.reporter.toLowerCase() === currentAccount.toLowerCase();
+              });
+            };
+
+            // Filter each category
+            const userReportedCount = filterReportsByCurrentUser(reportedCount);
+            const userCollectedCount = filterReportsByCurrentUser(collectedCount);
+            const userProcessedCount = filterReportsByCurrentUser(processedCount);
+
+            console.log('User\'s waste reports counts:', {
+              reported: userReportedCount.length,
+              collected: userCollectedCount.length,
+              processed: userProcessedCount.length
+            });
+
+            setReportedWaste(userReportedCount.length);
+            setCollectedWaste(userCollectedCount.length);
+            setProcessedWaste(userProcessedCount.length);
 
             // Combine all reports for history
-            const allReports = [...reportedCount, ...collectedCount, ...processedCount];
+            const allReports = [...userReportedCount, ...userCollectedCount, ...userProcessedCount];
 
             // Log some sample reports for debugging
             if (allReports.length > 0) {
@@ -182,12 +201,20 @@ export default function UserDashboard() {
                 console.log('Sample backend report:', response.reports[0]);
               }
 
+              // Filter backend reports to only show the current user's reports
+              const userBackendReports = response.reports.filter(report => {
+                return report.walletAddress &&
+                       report.walletAddress.toLowerCase() === currentAccount.toLowerCase();
+              });
+
+              console.log(`Found ${userBackendReports.length} backend reports for current user out of ${response.reports.length} total`);
+
               // Merge blockchain and backend data
               setWasteReports(prev => {
-                console.log(`Merging ${prev.length} blockchain reports with ${response.reports.length} backend reports`);
+                console.log(`Merging ${prev.length} blockchain reports with ${userBackendReports.length} backend reports`);
 
                 const combined = [...prev];
-                response.reports.forEach(backendReport => {
+                userBackendReports.forEach(backendReport => {
                   // Check if report already exists in the array
                   const exists = combined.some(r => r.qrCodeHash === backendReport.qrCodeHash);
                   if (!exists) {
@@ -200,7 +227,9 @@ export default function UserDashboard() {
                       // Ensure reportTime is a number
                       reportTime: backendReport.reportTime || new Date(backendReport.createdAt).getTime() / 1000,
                       // Ensure quantity is a number
-                      quantity: Number(backendReport.quantity) || 0
+                      quantity: Number(backendReport.quantity) || 0,
+                      // Add reporter field if missing
+                      reporter: backendReport.walletAddress || currentAccount
                     };
 
                     combined.push(formattedReport);
@@ -398,7 +427,17 @@ export default function UserDashboard() {
 
   return (
     <div className="space-y-8">
-      <h1 className="text-3xl font-bold">User Dashboard</h1>
+      <div className="mb-6">
+        <h1 className="text-3xl font-bold">My Dashboard</h1>
+        {currentAccount && (
+          <p className="text-gray-600 mt-2">
+            Wallet: {`${currentAccount.slice(0, 6)}...${currentAccount.slice(-4)}`}
+            {user && user.username && (
+              <span className="ml-2">| Username: {user.username}</span>
+            )}
+          </p>
+        )}
+      </div>
 
       {contractError && (
         <div className="bg-yellow-50 border border-yellow-200 rounded-md p-4 mb-6">

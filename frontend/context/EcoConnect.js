@@ -3,7 +3,8 @@
 import React, { useState, createContext, useEffect } from "react";
 import { ethers } from "ethers";
 import { useRouter } from 'next/navigation';
-import api from '../services/api';
+import api, { auth } from '../services/api';
+import InsufficientFundsModal from '../components/shared/InsufficientFundsModal';
 import {
   WASTE_VAN_ADDRESS,
   WASTE_VAN_TOKEN_ADDRESS,
@@ -42,6 +43,8 @@ export const EcoConnectContext = createContext({
   login: async () => {},
   logout: async () => {},
   registerWithBackend: async () => {},
+  showInsufficientFundsModal: false,
+  setShowInsufficientFundsModal: () => {},
 });
 
 export const EcoConnectProvider = ({ children }) => {
@@ -58,6 +61,9 @@ export const EcoConnectProvider = ({ children }) => {
   const [agentStatus, setAgentStatus] = useState(null);
   const [user, setUser] = useState(null);
   const [token, setToken] = useState(null);
+
+  // Modal states
+  const [showInsufficientFundsModal, setShowInsufficientFundsModal] = useState(false);
 
   // Check if user is already authenticated
   useEffect(() => {
@@ -131,34 +137,63 @@ export const EcoConnectProvider = ({ children }) => {
   // Function to check user registration status
   const checkUserStatus = async (contract, address, skipRedirect = false) => {
     try {
+      // Check if user is authenticated with backend
+      const isBackendAuthenticated = localStorage.getItem('token') && localStorage.getItem('user');
+
+      // Default to backend authentication if available
+      let isUserRegistered = isBackendAuthenticated;
+      let isUserAgent = false;
+
+      // Try to get blockchain status if contract and address are available
       if (contract && address) {
-        const user = await contract.users(address);
-        const isUserRegistered = user.isRegistered;
-        const isUserAgent = user.userType === UserType.Agent;
+        try {
+          const user = await contract.users(address);
+          // Update with blockchain status
+          isUserRegistered = isUserRegistered || user.isRegistered;
+          isUserAgent = user.userType === UserType.Agent;
 
-        // Only update state if we're not in the registration process
-        if (!skipRedirect) {
-          setIsRegistered(isUserRegistered);
-          setIsAgent(isUserAgent);
+          // Only update state if we're not in the registration process
+          if (!skipRedirect) {
+            setIsRegistered(isUserRegistered);
+            setIsAgent(isUserAgent);
 
-          if (isUserAgent) {
-            const agent = await contract.agents(address);
-            setAgentStatus(agent.status);
+            if (isUserAgent) {
+              const agent = await contract.agents(address);
+              setAgentStatus(agent.status);
+            }
+          }
+        } catch (contractError) {
+          console.warn("Error checking blockchain user status:", contractError);
+          console.log("Falling back to backend authentication status");
+
+          // Only update state if we're not in the registration process
+          if (!skipRedirect) {
+            setIsRegistered(isBackendAuthenticated);
           }
         }
-
-        // Return the status without updating state if skipRedirect is true
-        return {
-          isRegistered: isUserRegistered,
-          isAgent: isUserAgent
-        };
+      } else if (!skipRedirect) {
+        // If no contract or address, just use backend authentication
+        setIsRegistered(isBackendAuthenticated);
       }
+
+      // Return the status
+      return {
+        isRegistered: isUserRegistered,
+        isAgent: isUserAgent
+      };
     } catch (error) {
-      console.error("Error checking user status:", error);
+      console.error("Error in checkUserStatus:", error);
+    }
+
+    // Default fallback
+    const fallbackIsRegistered = localStorage.getItem('token') && localStorage.getItem('user');
+
+    if (!skipRedirect) {
+      setIsRegistered(fallbackIsRegistered);
     }
 
     return {
-      isRegistered: false,
+      isRegistered: fallbackIsRegistered,
       isAgent: false
     };
   };
@@ -265,6 +300,87 @@ export const EcoConnectProvider = ({ children }) => {
         setIsAgent(response.user.userType === 'agent');
         if (response.user.userType === 'agent') {
           setAgentStatus(response.user.agentStatus);
+        }
+
+        // Check if user is registered on blockchain and register if not
+        if (wasteVanContract) {
+          try {
+            console.log('Checking blockchain registration status...');
+            const user = await wasteVanContract.users(userAddress);
+
+            if (!user.isRegistered) {
+              console.log('User not registered on blockchain. Attempting to register...');
+
+              if (response.user.userType === 'agent') {
+                // For agents, we need to check if they have enough points
+                console.log('Registering as agent on blockchain...');
+                try {
+                  // Get the point cost and minimum points required
+                  const pointCost = await wasteVanContract.pointCost();
+                  const minAgentPoints = await wasteVanContract.MIN_AGENT_POINTS();
+
+                  // Calculate required ETH
+                  const requiredEth = pointCost * minAgentPoints;
+
+                  const tx = await wasteVanContract.registerAgent({ value: requiredEth });
+                  await tx.wait();
+                  console.log('Successfully registered as agent on blockchain');
+
+                  // Verify registration was successful
+                  const userCheck = await wasteVanContract.users(userAddress);
+                  if (!userCheck.isRegistered) {
+                    throw new Error('Blockchain registration verification failed. User still not registered.');
+                  }
+                  console.log('Agent blockchain registration verified successfully!');
+                } catch (agentError) {
+                  console.error('Failed to register as agent on blockchain:', agentError);
+                  console.log('Continuing with regular user registration on blockchain...');
+
+                  // Fall back to regular user registration
+                  const tx = await wasteVanContract.registerUser();
+                  await tx.wait();
+                  console.log('Successfully registered as regular user on blockchain');
+
+                  // Verify registration was successful
+                  const userCheck = await wasteVanContract.users(userAddress);
+                  if (!userCheck.isRegistered) {
+                    throw new Error('Blockchain registration verification failed. User still not registered.');
+                  }
+                  console.log('Regular user blockchain registration verified successfully!');
+                }
+              } else {
+                // Regular user registration
+                console.log('Registering as regular user on blockchain...');
+                const tx = await wasteVanContract.registerUser();
+                await tx.wait();
+                console.log('Successfully registered as regular user on blockchain');
+
+                // Verify registration was successful
+                const userCheck = await wasteVanContract.users(userAddress);
+                if (!userCheck.isRegistered) {
+                  throw new Error('Blockchain registration verification failed. User still not registered.');
+                }
+                console.log('Regular user blockchain registration verified successfully!');
+              }
+
+              // Update user status
+              await checkUserStatus(wasteVanContract, userAddress);
+
+              // Double-check registration status
+              const finalCheck = await wasteVanContract.users(userAddress);
+              if (!finalCheck.isRegistered) {
+                console.error('User still not registered on blockchain after registration attempt.');
+                alert('Warning: Blockchain registration failed. Some features may be limited.');
+              } else {
+                console.log('Final verification: User successfully registered on blockchain!');
+              }
+            } else {
+              console.log('User already registered on blockchain');
+            }
+          } catch (blockchainError) {
+            console.error('Error checking/updating blockchain registration:', blockchainError);
+            console.log('Continuing with backend-only login');
+          }
         }
 
         // Redirect to appropriate dashboard
@@ -394,6 +510,57 @@ export const EcoConnectProvider = ({ children }) => {
           const accounts = await window.ethereum.request({ method: 'eth_accounts' });
           if (accounts.length > 0 && accounts[0].toLowerCase() === response.user.walletAddress.toLowerCase()) {
             await connectWalletInternal(accounts[0]);
+
+            // Check if user is registered on blockchain and register if not
+            if (wasteVanContract) {
+              try {
+                console.log('Checking blockchain registration status...');
+                const user = await wasteVanContract.users(accounts[0]);
+
+                if (!user.isRegistered) {
+                  console.log('User not registered on blockchain. Attempting to register...');
+
+                  if (response.user.userType === 'agent') {
+                    // For agents, we need to check if they have enough points
+                    console.log('Registering as agent on blockchain...');
+                    try {
+                      // Get the point cost and minimum points required
+                      const pointCost = await wasteVanContract.pointCost();
+                      const minAgentPoints = await wasteVanContract.MIN_AGENT_POINTS();
+
+                      // Calculate required ETH
+                      const requiredEth = pointCost * minAgentPoints;
+
+                      const tx = await wasteVanContract.registerAgent({ value: requiredEth });
+                      await tx.wait();
+                      console.log('Successfully registered as agent on blockchain');
+                    } catch (agentError) {
+                      console.error('Failed to register as agent on blockchain:', agentError);
+                      console.log('Continuing with regular user registration on blockchain...');
+
+                      // Fall back to regular user registration
+                      const tx = await wasteVanContract.registerUser();
+                      await tx.wait();
+                      console.log('Successfully registered as regular user on blockchain');
+                    }
+                  } else {
+                    // Regular user registration
+                    console.log('Registering as regular user on blockchain...');
+                    const tx = await wasteVanContract.registerUser();
+                    await tx.wait();
+                    console.log('Successfully registered as regular user on blockchain');
+                  }
+
+                  // Update user status
+                  await checkUserStatus(wasteVanContract, accounts[0]);
+                } else {
+                  console.log('User already registered on blockchain');
+                }
+              } catch (blockchainError) {
+                console.error('Error checking/updating blockchain registration:', blockchainError);
+                console.log('Continuing with backend-only login');
+              }
+            }
           }
         } catch (error) {
           console.error("Failed to connect wallet after login:", error);
@@ -467,6 +634,287 @@ export const EcoConnectProvider = ({ children }) => {
       // Set agent status if applicable
       if (response.user.userType === 'agent') {
         setAgentStatus(response.user.agentStatus || 'pending');
+      }
+
+      // Check user's balance before attempting blockchain registration
+      console.log('Checking user balance before blockchain registration...');
+      try {
+        if (wasteVanContract && provider) {
+          // Get user's balance
+          const balance = await provider.getBalance(currentAccount);
+          console.log('User balance:', ethers.formatEther(balance), 'ETH');
+
+          // Estimate gas for registration (regular user)
+          let estimatedGas;
+          try {
+            estimatedGas = await wasteVanContract.registerUser.estimateGas();
+            console.log('Estimated gas for registration:', estimatedGas.toString());
+          } catch (gasError) {
+            console.error('Failed to estimate gas:', gasError);
+            estimatedGas = ethers.parseEther('0.01'); // Fallback estimate
+          }
+
+          // Check if user has enough balance for gas
+          if (balance < estimatedGas) {
+            console.error('Insufficient funds for blockchain registration');
+
+            // Clean up backend registration since blockchain registration will fail
+            await api.auth.deleteUser(response.user._id);
+
+            // Clear user data
+            setUser(null);
+            setToken(null);
+            setIsRegistered(false);
+            setIsAgent(false);
+            localStorage.removeItem('user');
+            localStorage.removeItem('token');
+
+            // Disconnect wallet
+            setCurrentAccount("");
+            setWasteVanContract(null);
+            setWasteVanTokenContract(null);
+            setSigner(null);
+
+            // Show beautiful modal
+            setShowInsufficientFundsModal(true);
+
+            // Redirect to home page after a short delay
+            setTimeout(() => {
+              router.push('/');
+            }, 1500);
+
+            return null;
+          }
+
+          // Register on blockchain
+          console.log('Attempting to register on blockchain...');
+          if (response.user.userType === 'agent') {
+            // For agents, we need to check if they have enough points
+            console.log('Registering as agent on blockchain...');
+            try {
+              // Get the point cost and minimum points required
+              const pointCost = await wasteVanContract.pointCost();
+              const minAgentPoints = await wasteVanContract.MIN_AGENT_POINTS();
+
+              // Calculate required ETH
+              const requiredEth = pointCost * minAgentPoints;
+
+              // Check if user has enough balance for agent registration
+              if (balance < requiredEth.add(estimatedGas)) {
+                console.error('Insufficient funds for agent registration');
+                console.log('Falling back to regular user registration...');
+
+                // Fall back to regular user registration
+                const tx = await wasteVanContract.registerUser();
+                await tx.wait();
+                console.log('Successfully registered as regular user on blockchain');
+
+                // Verify registration was successful
+                const user = await wasteVanContract.users(currentAccount);
+                if (!user.isRegistered) {
+                  throw new Error('Blockchain registration verification failed. User still not registered.');
+                }
+                console.log('Regular user blockchain registration verified successfully!');
+              } else {
+                // Proceed with agent registration
+                const tx = await wasteVanContract.registerAgent({ value: requiredEth });
+                await tx.wait();
+                console.log('Successfully registered as agent on blockchain');
+
+                // Verify registration was successful
+                const user = await wasteVanContract.users(currentAccount);
+                if (!user.isRegistered) {
+                  throw new Error('Blockchain registration verification failed. User still not registered.');
+                }
+                console.log('Agent blockchain registration verified successfully!');
+              }
+            } catch (agentError) {
+              // Check if error is due to insufficient funds
+              if (agentError.message && agentError.message.includes('insufficient funds')) {
+                console.error('Insufficient funds for agent blockchain registration:', agentError);
+
+                // Clean up backend registration since blockchain registration failed
+                await api.auth.deleteUser(response.user._id);
+
+                // Clear user data
+                setUser(null);
+                setToken(null);
+                setIsRegistered(false);
+                setIsAgent(false);
+                localStorage.removeItem('user');
+                localStorage.removeItem('token');
+
+                // Disconnect wallet
+                setCurrentAccount("");
+                setWasteVanContract(null);
+                setWasteVanTokenContract(null);
+                setSigner(null);
+
+                // Show beautiful modal
+                setShowInsufficientFundsModal(true);
+
+                // Redirect to home page after a short delay
+                setTimeout(() => {
+                  router.push('/');
+                }, 1500);
+
+                return null;
+              }
+
+              console.error('Failed to register as agent on blockchain:', agentError);
+              console.log('Continuing with regular user registration on blockchain...');
+
+              // Fall back to regular user registration
+              try {
+                const tx = await wasteVanContract.registerUser();
+                await tx.wait();
+                console.log('Successfully registered as regular user on blockchain');
+
+                // Verify registration was successful
+                const user = await wasteVanContract.users(currentAccount);
+                if (!user.isRegistered) {
+                  throw new Error('Blockchain registration verification failed. User still not registered.');
+                }
+                console.log('Regular user blockchain registration verified successfully!');
+              } catch (regularError) {
+                // Check if error is due to insufficient funds
+                if (regularError.message && regularError.message.includes('insufficient funds')) {
+                  console.error('Insufficient funds for regular user blockchain registration:', regularError);
+
+                  // Clean up backend registration since blockchain registration failed
+                  await api.auth.deleteUser(response.user._id);
+
+                  // Clear user data
+                  setUser(null);
+                  setToken(null);
+                  setIsRegistered(false);
+                  setIsAgent(false);
+                  localStorage.removeItem('user');
+                  localStorage.removeItem('token');
+
+                  // Disconnect wallet
+                  setCurrentAccount("");
+                  setWasteVanContract(null);
+                  setWasteVanTokenContract(null);
+                  setSigner(null);
+
+                  // Show beautiful modal
+                  setShowInsufficientFundsModal(true);
+
+                  // Redirect to home page after a short delay
+                  setTimeout(() => {
+                    router.push('/');
+                  }, 1500);
+
+                  return null;
+                }
+                throw regularError;
+              }
+            }
+          } else {
+            // Regular user registration
+            console.log('Registering as regular user on blockchain...');
+            try {
+              const tx = await wasteVanContract.registerUser();
+              await tx.wait();
+              console.log('Successfully registered as regular user on blockchain');
+
+              // Verify registration was successful
+              const user = await wasteVanContract.users(currentAccount);
+              if (!user.isRegistered) {
+                throw new Error('Blockchain registration verification failed. User still not registered.');
+              }
+              console.log('Regular user blockchain registration verified successfully!');
+            } catch (regularError) {
+              // Check if error is due to insufficient funds
+              if (regularError.message && regularError.message.includes('insufficient funds')) {
+                console.error('Insufficient funds for regular user blockchain registration:', regularError);
+
+                // Clean up backend registration since blockchain registration failed
+                await api.auth.deleteUser(response.user._id);
+
+                // Clear user data
+                setUser(null);
+                setToken(null);
+                setIsRegistered(false);
+                setIsAgent(false);
+                localStorage.removeItem('user');
+                localStorage.removeItem('token');
+
+                // Disconnect wallet
+                setCurrentAccount("");
+                setWasteVanContract(null);
+                setWasteVanTokenContract(null);
+                setSigner(null);
+
+                // Show beautiful modal
+                setShowInsufficientFundsModal(true);
+
+                // Redirect to home page after a short delay
+                setTimeout(() => {
+                  router.push('/');
+                }, 1500);
+
+                return null;
+              }
+              throw regularError;
+            }
+          }
+
+          // Update user status
+          await checkUserStatus(wasteVanContract, currentAccount);
+
+          // Double-check registration status
+          const user = await wasteVanContract.users(currentAccount);
+          if (!user.isRegistered) {
+            console.error('User still not registered on blockchain after registration attempt.');
+            alert('Warning: Your account was created but blockchain registration failed. Some features may be limited.');
+          } else {
+            console.log('Final verification: User successfully registered on blockchain!');
+          }
+        } else {
+          console.warn('Contract not initialized, skipping blockchain registration');
+          // Show beautiful modal instead of alert
+          setShowInsufficientFundsModal(true);
+        }
+      } catch (blockchainError) {
+        console.error('Failed to register on blockchain:', blockchainError);
+
+        // Check if error is due to insufficient funds
+        if (blockchainError.message && blockchainError.message.includes('insufficient funds')) {
+          console.error('Insufficient funds for blockchain registration:', blockchainError);
+
+          // Clean up backend registration since blockchain registration failed
+          await api.auth.deleteUser(response.user._id);
+
+          // Clear user data
+          setUser(null);
+          setToken(null);
+          setIsRegistered(false);
+          setIsAgent(false);
+          localStorage.removeItem('user');
+          localStorage.removeItem('token');
+
+          // Disconnect wallet
+          setCurrentAccount("");
+          setWasteVanContract(null);
+          setWasteVanTokenContract(null);
+          setSigner(null);
+
+          // Show beautiful modal
+          setShowInsufficientFundsModal(true);
+
+          // Redirect to home page after a short delay
+          setTimeout(() => {
+            router.push('/');
+          }, 1500);
+
+          return null;
+        }
+
+        console.log('Continuing with backend-only registration');
+        // Show beautiful modal instead of alert
+        setShowInsufficientFundsModal(true);
       }
 
       // Redirect to appropriate dashboard
@@ -559,9 +1007,62 @@ export const EcoConnectProvider = ({ children }) => {
         }
       }
 
-      // Check if user is registered
-      if (!isRegistered) {
+      // Check if user is registered - consider both backend and blockchain registration
+      const isBackendAuthenticated = localStorage.getItem('token') && localStorage.getItem('user');
+      const isBlockchainAuthenticated = isRegistered;
+
+      if (!isBackendAuthenticated && !isBlockchainAuthenticated) {
         throw new Error("User not registered. Please register before reporting waste.");
+      }
+
+      // If user is authenticated with backend but not registered on blockchain, register them
+      if (!isBlockchainAuthenticated && isBackendAuthenticated) {
+        console.warn('User is authenticated with backend but not registered on blockchain. Attempting to register on blockchain...');
+
+        try {
+          // Try to register the user on the blockchain
+          if (wasteVanContract) {
+            // Check if the registerUser function exists on the contract
+            if (typeof wasteVanContract.registerUser === 'function') {
+              console.log('Registering user on blockchain...');
+              const tx = await wasteVanContract.registerUser();
+              await tx.wait();
+              console.log('User registered on blockchain successfully!');
+
+              // Update registration status
+              setIsRegistered(true);
+
+              // Verify registration was successful
+              const user = await wasteVanContract.users(currentAccount);
+              if (!user.isRegistered) {
+                throw new Error('Blockchain registration verification failed. User still not registered.');
+              }
+
+              console.log('Blockchain registration verified successfully!');
+            } else {
+              throw new Error('registerUser function not found on contract.');
+            }
+          } else {
+            throw new Error('Contract not initialized for registration.');
+          }
+        } catch (registerError) {
+          console.error('Failed to register user on blockchain:', registerError);
+          throw new Error('Failed to register on blockchain: ' + registerError.message);
+        }
+      }
+
+      // Double-check registration status before proceeding
+      try {
+        if (wasteVanContract) {
+          const user = await wasteVanContract.users(currentAccount);
+          if (!user.isRegistered) {
+            throw new Error('User not registered on blockchain. Please try registering again.');
+          }
+          console.log('Confirmed user is registered on blockchain.');
+        }
+      } catch (verificationError) {
+        console.error('Registration verification failed:', verificationError);
+        throw new Error('Registration verification failed: ' + verificationError.message);
       }
 
       console.log('Reporting waste with parameters:', { plasticType, quantityInGrams, qrCodeHash });
@@ -686,37 +1187,48 @@ export const EcoConnectProvider = ({ children }) => {
   };
 
   return (
-    <EcoConnectContext.Provider
-      value={{
-        connectWallet,
-        connectWalletInternal,
-        connectWalletForRegistration,
-        currentAccount,
-        loading,
-        wasteVanContract,
-        wasteVanTokenContract,
-        provider,
-        signer,
-        userType,
-        isRegistered,
-        isAgent,
-        agentStatus,
-        user,
-        token,
-        registerUser,
-        registerAgent,
-        reportWaste,
-        collectWaste,
-        processWaste,
-        getWasteReportsByStatus,
-        getUserTokenBalance,
-        getAgentStats,
-        login,
-        logout,
-        registerWithBackend
-      }}
-    >
-      {children}
-    </EcoConnectContext.Provider>
+    <>
+      <EcoConnectContext.Provider
+        value={{
+          connectWallet,
+          connectWalletInternal,
+          connectWalletForRegistration,
+          currentAccount,
+          loading,
+          wasteVanContract,
+          wasteVanTokenContract,
+          provider,
+          signer,
+          userType,
+          isRegistered,
+          isAgent,
+          agentStatus,
+          user,
+          token,
+          registerUser,
+          registerAgent,
+          reportWaste,
+          collectWaste,
+          processWaste,
+          getWasteReportsByStatus,
+          getUserTokenBalance,
+          getAgentStats,
+          login,
+          logout,
+          registerWithBackend,
+          showInsufficientFundsModal,
+          setShowInsufficientFundsModal
+        }}
+      >
+        {children}
+
+        {/* Beautiful Insufficient Funds Modal */}
+        <InsufficientFundsModal
+          isOpen={showInsufficientFundsModal}
+          onClose={() => setShowInsufficientFundsModal(false)}
+          walletAddress={currentAccount}
+        />
+      </EcoConnectContext.Provider>
+    </>
   );
 };

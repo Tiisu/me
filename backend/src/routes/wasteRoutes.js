@@ -8,7 +8,16 @@ const router = express.Router();
 
 // Validation middleware
 const reportWasteValidation = [
-  body('plasticType').isIn(['PET', 'HDPE', 'PVC', 'LDPE', 'PP', 'PS', 'Other']).withMessage('Invalid plastic type'),
+  body('plasticType').custom(value => {
+    // Accept both string values and numeric values (0-6)
+    const validStrings = ['PET', 'HDPE', 'PVC', 'LDPE', 'PP', 'PS', 'Other'];
+    const validNumbers = [0, 1, 2, 3, 4, 5, 6];
+
+    // Convert to number if it's a string that looks like a number
+    const numValue = !isNaN(value) ? Number(value) : -1;
+
+    return validStrings.includes(value) || validNumbers.includes(numValue);
+  }).withMessage('Invalid plastic type'),
   body('quantity').isNumeric().withMessage('Quantity must be a number')
 ];
 

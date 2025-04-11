@@ -48,6 +48,17 @@ export const authService = {
       message
     });
     return response.data;
+  },
+
+  deleteUser: async (userId) => {
+    try {
+      const response = await api.delete(`/auth/users/${userId}`);
+      return response.data;
+    } catch (error) {
+      console.error('Failed to delete user:', error);
+      // Don't throw error, just log it
+      return { success: false };
+    }
   }
 };
 
@@ -87,12 +98,27 @@ export const wasteService = {
   },
 
   reportWasteWithImages: async (formData) => {
-    const response = await api.post('/waste/report', formData, {
-      headers: {
-        'Content-Type': 'multipart/form-data'
-      }
-    });
-    return response.data;
+    try {
+      console.log('Sending waste report with data:', {
+        plasticType: formData.get('plasticType'),
+        quantity: formData.get('quantity'),
+        qrCodeHash: formData.get('qrCodeHash'),
+        walletAddress: formData.get('walletAddress'),
+        description: formData.get('description'),
+        hasImages: formData.getAll('images').length > 0
+      });
+
+      const response = await api.post('/waste/report', formData, {
+        headers: {
+          'Content-Type': 'multipart/form-data'
+        }
+      });
+      return response.data;
+    } catch (error) {
+      console.error('API error in reportWasteWithImages:', error);
+      console.error('Error response:', error.response?.data);
+      throw error;
+    }
   },
 
   getQRCode: async (qrCodeHash) => {
@@ -404,3 +430,11 @@ export default {
   notification: notificationService,
   admin: adminService
 };
+
+// Export individual services for direct access
+export const auth = authService;
+export const user = userService;
+export const waste = wasteService;
+export const agent = agentService;
+export const notification = notificationService;
+export const admin = adminService;

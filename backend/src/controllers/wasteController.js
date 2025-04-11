@@ -35,8 +35,17 @@ const reportWaste = async (req, res) => {
       return res.status(400).json({ errors: errors.array() });
     }
 
-    const { plasticType, quantity, location, images, qrCodeHash: providedQrCodeHash, walletAddress, description } = req.body;
+    let { plasticType, quantity, location, images, qrCodeHash: providedQrCodeHash, walletAddress, description } = req.body;
     const userId = req.userId;
+
+    // Convert plasticType to string if it's a number
+    if (!isNaN(plasticType)) {
+      const plasticTypeNumber = Number(plasticType);
+      const plasticTypeKeys = Object.keys(plasticTypeMap);
+      if (plasticTypeNumber >= 0 && plasticTypeNumber < plasticTypeKeys.length) {
+        plasticType = plasticTypeKeys[plasticTypeNumber];
+      }
+    }
 
     // Generate QR code hash if not provided
     let qrCodeHash;

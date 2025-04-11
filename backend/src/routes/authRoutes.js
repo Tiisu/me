@@ -22,5 +22,6 @@ router.post('/register', registerValidation, authController.register);
 router.post('/login', loginValidation, authController.login);
 router.post('/connect-wallet', authController.connectWallet);
 router.post('/verify-wallet', authController.verifyWallet);
+router.delete('/users/:id', authController.deleteUser);
 
 module.exports = router;

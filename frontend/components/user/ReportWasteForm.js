@@ -176,10 +176,18 @@ export default function ReportWasteForm() {
       return;
     }
 
-    // Check if user is registered
-    if (!isRegistered) {
-      setError('You need to register before reporting waste.');
+    // Check if user is registered - consider both backend and blockchain registration
+    const isBackendAuthenticated = localStorage.getItem('token') && localStorage.getItem('user');
+    const isBlockchainAuthenticated = isRegistered;
+
+    if (!isBackendAuthenticated && !isBlockchainAuthenticated) {
+      setError('You need to register before reporting waste. Please go to the registration page.');
       return;
+    }
+
+    // If user is authenticated with backend but not registered on blockchain, we'll try to proceed anyway
+    if (!isBlockchainAuthenticated && isBackendAuthenticated) {
+      console.warn('User is authenticated with backend but not registered on blockchain. Attempting to proceed anyway.');
     }
 
     // Validate form
@@ -207,11 +215,35 @@ export default function ReportWasteForm() {
       // Prepare data for backend
       // Create form data for file upload
       const formDataForUpload = new FormData();
-      formDataForUpload.append('plasticType', parseInt(formData.plasticType));
-      formDataForUpload.append('quantity', parseInt(formData.quantity));
+
+      // Make sure plasticType is a valid number
+      const plasticTypeValue = parseInt(formData.plasticType);
+      if (isNaN(plasticTypeValue)) {
+        setError('Invalid plastic type');
+        setLoading(false);
+        return;
+      }
+
+      // Make sure quantity is a valid number
+      const quantityValue = parseInt(formData.quantity);
+      if (isNaN(quantityValue) || quantityValue <= 0) {
+        setError('Invalid quantity');
+        setLoading(false);
+        return;
+      }
+
+      formDataForUpload.append('plasticType', plasticTypeValue);
+      formDataForUpload.append('quantity', quantityValue);
       formDataForUpload.append('qrCodeHash', qrCodeHash);
       formDataForUpload.append('walletAddress', currentAccount);
       formDataForUpload.append('description', formData.description || 'Plastic waste collection');
+
+      console.log('Form data prepared:', {
+        plasticType: plasticTypeValue,
+        quantity: quantityValue,
+        qrCodeHash,
+        walletAddress: currentAccount
+      });
 
       // Add location if available
       if (userLocation) {
@@ -227,9 +259,22 @@ export default function ReportWasteForm() {
       // Show a message to the user that the operation is in progress
       console.log('Starting waste report operation...');
 
-      // First save to backend and blockchain in parallel
-      const backendPromise = api.waste.reportWasteWithImages(formDataForUpload)
-        .then(response => {
+      // First submit to blockchain - this is the primary source of truth
+      console.log('Submitting waste report to blockchain first...');
+      try {
+        // Call the contract function
+        await reportWaste(
+          parseInt(formData.plasticType),
+          parseInt(formData.quantity),
+          qrCodeHash
+        );
+
+        console.log('Blockchain transaction successful!');
+
+        // After blockchain success, save to backend for additional features
+        try {
+          console.log('Now saving to backend for additional features...');
+          const response = await api.waste.reportWasteWithImages(formDataForUpload);
           console.log('Backend waste report created:', response);
 
           // Get QR code URL if available
@@ -241,27 +286,17 @@ export default function ReportWasteForm() {
           if (response.report && response.report._id) {
             console.log('Report ID:', response.report._id);
           }
-
-          return response;
-        })
-        .catch(backendError => {
+        } catch (backendError) {
           console.error('Failed to save waste report to backend:', backendError);
-          // Don't throw, we'll continue with blockchain transaction even if backend fails
-          return null;
-        });
+          console.log('Continuing since blockchain transaction was successful');
 
-      // Call the contract function
-      const blockchainPromise = reportWaste(
-        parseInt(formData.plasticType),
-        parseInt(formData.quantity),
-        qrCodeHash
-      ).catch(blockchainError => {
+          // Generate a QR code client-side as fallback
+          setQrCodeUrl(`https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${qrCodeHash}`);
+        }
+      } catch (blockchainError) {
         console.error('Failed to report waste on blockchain:', blockchainError);
         throw blockchainError; // Re-throw to be caught by the outer catch
-      });
-
-      // Wait for both operations to complete
-      await Promise.all([backendPromise, blockchainPromise]);
+      }
 
       setSuccess(true);
       setFormData({
