@@ -11,6 +11,10 @@ const wasteReportSchema = new mongoose.Schema({
     ref: 'User',
     required: true
   },
+  walletAddress: {
+    type: String,
+    index: true
+  },
   plasticType: {
     type: String,
     enum: ['PET', 'HDPE', 'PVC', 'LDPE', 'PP', 'PS', 'Other'],

@@ -8,8 +8,10 @@ import { ethers } from 'ethers';
 import { AgentStatus } from '@/context/Constants';
 import CollectWasteForm from './CollectWasteForm';
 import ProcessWasteForm from './ProcessWasteForm';
+import { useRouter } from 'next/navigation';
 
 export default function AgentDashboard() {
+  const router = useRouter();
   const {
     currentAccount,
     wasteVanContract,
@@ -23,8 +25,23 @@ export default function AgentDashboard() {
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState('collect');
   const [contractError, setContractError] = useState(false);
+  const [isMounted, setIsMounted] = useState(false);
+
+  // Handle client-side only code
+  useEffect(() => {
+    setIsMounted(true);
+
+    // Check if user is authenticated
+    if (!isAgent && !currentAccount) {
+      router.push('/loginRegister');
+      return;
+    }
+  }, [isAgent, currentAccount, router]);
 
   useEffect(() => {
+    // Skip if not mounted (to prevent hydration mismatch)
+    if (!isMounted) return;
+
     console.log('AgentDashboard - Checking contract status:', {
       currentAccount: currentAccount ? 'connected' : 'not connected',
       contract: wasteVanContract ? 'initialized' : 'not initialized',
@@ -38,7 +55,7 @@ export default function AgentDashboard() {
       setContractError(true);
 
       // Try to reconnect wallet
-      if (window.ethereum) {
+      if (window && window.ethereum) {
         window.ethereum.request({ method: 'eth_accounts' })
           .then(accounts => {
             if (accounts.length > 0) {
@@ -76,8 +93,11 @@ export default function AgentDashboard() {
       }
     };
 
-    fetchAgentData();
-  }, [currentAccount, wasteVanContract, isAgent, agentStatus, getAgentStats, connectWallet]);
+    // Only fetch data if component is mounted
+    if (isMounted) {
+      fetchAgentData();
+    }
+  }, [currentAccount, wasteVanContract, isAgent, agentStatus, getAgentStats, connectWallet, isMounted]);
 
   if (!isAgent) {
     return (
@@ -98,6 +118,15 @@ export default function AgentDashboard() {
           Your agent account is pending approval from the administrator.
           You'll be able to access the agent dashboard once approved.
         </p>
+      </div>
+    );
+  }
+
+  // Don't render anything until client-side hydration is complete
+  if (!isMounted) {
+    return (
+      <div className="flex justify-center items-center min-h-screen">
+        <Loader2 className="h-8 w-8 animate-spin text-gray-400" />
       </div>
     );
   }

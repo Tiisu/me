@@ -7,8 +7,10 @@ import { EcoConnectContext } from '@/context/EcoConnect';
 import { ethers } from 'ethers';
 import ReportWasteForm from './ReportWasteForm';
 import api from '@/services/api';
+import { useRouter } from 'next/navigation';
 
 export default function UserDashboard() {
+  const router = useRouter();
   const {
     currentAccount,
     wasteVanContract,
@@ -16,7 +18,8 @@ export default function UserDashboard() {
     getUserTokenBalance,
     getWasteReportsByStatus,
     user,
-    connectWallet
+    connectWallet,
+    isRegistered
   } = useContext(EcoConnectContext);
 
   const [tokenBalance, setTokenBalance] = useState(null);
@@ -27,8 +30,25 @@ export default function UserDashboard() {
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState('overview');
   const [contractError, setContractError] = useState(false);
+  const [isMounted, setIsMounted] = useState(false);
+
+  // Handle client-side only code
+  useEffect(() => {
+    setIsMounted(true);
+
+    // Check if user is authenticated - only redirect if neither user nor wallet is connected
+    // This allows users who have connected their wallet but not registered to stay on the page
+    if (!user && !currentAccount && isMounted) {
+      console.log('No authentication found, redirecting to login/register');
+      router.push('/loginRegister');
+      return;
+    }
+  }, [user, currentAccount, router, isMounted]);
 
   useEffect(() => {
+    // Skip if not mounted (to prevent hydration mismatch)
+    if (!isMounted) return;
+
     // Check if user is authenticated
     const isAuthenticated = user && localStorage.getItem('token');
     console.log('UserDashboard - Authentication check:', {
@@ -131,9 +151,26 @@ export default function UserDashboard() {
                   }
                 });
                 return combined.sort((a, b) => {
-                  const timeA = b.reportTime || new Date(b.createdAt).getTime() / 1000;
-                  const timeB = a.reportTime || new Date(a.createdAt).getTime() / 1000;
-                  return timeA - timeB;
+                  try {
+                    // Convert timestamps to numbers, handling BigInt if needed
+                    const getTimeValue = (item) => {
+                      if (item.reportTime) {
+                        return typeof item.reportTime === 'bigint'
+                          ? Number(item.reportTime)
+                          : Number(item.reportTime);
+                      } else if (item.createdAt) {
+                        return new Date(item.createdAt).getTime() / 1000;
+                      }
+                      return 0;
+                    };
+
+                    const timeA = getTimeValue(b); // Note: b first for descending order
+                    const timeB = getTimeValue(a);
+                    return timeA - timeB;
+                  } catch (error) {
+                    console.error('Error sorting waste reports:', error);
+                    return 0;
+                  }
                 });
               });
               console.log('Combined waste reports:', wasteReports.length);
@@ -152,23 +189,48 @@ export default function UserDashboard() {
       }
     };
 
-    fetchUserData();
-  }, [currentAccount, wasteVanContract, getUserTokenBalance, getWasteReportsByStatus, user, connectWallet]);
+    // Only fetch data if component is mounted
+    if (isMounted) {
+      fetchUserData();
+    }
+  }, [currentAccount, wasteVanContract, getUserTokenBalance, getWasteReportsByStatus, user, connectWallet, isMounted]);
 
   // Helper function to format date from timestamp
   const formatDate = (timestamp) => {
     if (!timestamp) return 'N/A';
 
-    // Check if timestamp is in seconds (blockchain) or milliseconds (JS Date)
-    const date = timestamp > 10000000000
-      ? new Date(timestamp) // Already in milliseconds
-      : new Date(timestamp * 1000); // Convert from seconds to milliseconds
+    try {
+      // Convert BigInt to Number if needed
+      let timestampNum;
+      if (typeof timestamp === 'bigint') {
+        console.log('Converting BigInt timestamp to Number:', timestamp.toString());
+        timestampNum = Number(timestamp);
+      } else {
+        timestampNum = Number(timestamp);
+      }
 
-    return date.toLocaleString();
+      // Check if timestamp is in seconds (blockchain) or milliseconds (JS Date)
+      const date = timestampNum > 10000000000
+        ? new Date(timestampNum) // Already in milliseconds
+        : new Date(timestampNum * 1000); // Convert from seconds to milliseconds
+
+      return date.toLocaleString();
+    } catch (error) {
+      console.error('Error formatting date:', error, 'Timestamp:', timestamp, 'Type:', typeof timestamp);
+      return 'Invalid Date';
+    }
   };
 
   // Helper function to get status badge
   const getStatusBadge = (status) => {
+    if (status === undefined || status === null) return 'Unknown';
+
+    // Convert BigInt to Number if needed
+    if (typeof status === 'bigint') {
+      console.log('Converting BigInt status to Number:', status.toString());
+      status = Number(status);
+    }
+
     // Convert numeric status to string if needed
     const statusStr = typeof status === 'number'
       ? (status === 0 ? 'reported' : status === 1 ? 'collected' : 'processed')
@@ -211,14 +273,27 @@ export default function UserDashboard() {
 
   // Helper function to get plastic type name
   const getPlasticTypeName = (type) => {
+    if (type === undefined || type === null) return 'Unknown';
+
+    // Convert BigInt to Number if needed
+    if (typeof type === 'bigint') {
+      console.log('Converting BigInt plastic type to Number:', type.toString());
+      type = Number(type);
+    }
+
+    // Convert to string for lookup if it's a number
+    if (typeof type === 'number') {
+      type = type.toString();
+    }
+
     const plasticTypes = {
-      0: 'PET',
-      1: 'HDPE',
-      2: 'PVC',
-      3: 'LDPE',
-      4: 'PP',
-      5: 'PS',
-      6: 'Other',
+      '0': 'PET',
+      '1': 'HDPE',
+      '2': 'PVC',
+      '3': 'LDPE',
+      '4': 'PP',
+      '5': 'PS',
+      '6': 'Other',
       'PET': 'PET',
       'HDPE': 'HDPE',
       'PVC': 'PVC',
@@ -230,6 +305,15 @@ export default function UserDashboard() {
 
     return plasticTypes[type] || 'Unknown';
   };
+
+  // Don't render anything until client-side hydration is complete
+  if (!isMounted) {
+    return (
+      <div className="flex justify-center items-center min-h-screen">
+        <Loader2 className="h-8 w-8 animate-spin text-gray-400" />
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-8">
@@ -276,7 +360,12 @@ export default function UserDashboard() {
               Waste History
             </button>
             <button
-              onClick={() => setActiveTab('report')}
+              onClick={() => {
+                // Always switch to the report tab - the ReportWasteForm component will handle
+                // wallet connection if needed
+                console.log('Switching to report tab, wallet status:', currentAccount ? 'connected' : 'not connected');
+                setActiveTab('report');
+              }}
               className={`px-4 py-2 rounded-md ${activeTab === 'report' ? 'bg-green-600 text-white' : 'bg-gray-100'}`}
             >
               Report Waste
@@ -348,7 +437,11 @@ export default function UserDashboard() {
                             <div className="text-sm text-gray-500">{formatDate(report.reportTime)}</div>
                           </div>
                           <div className="text-right">
-                            <div className="font-medium">{report.quantity?.toString() || '0'} grams</div>
+                            <div className="font-medium">
+                              {typeof report.quantity === 'bigint'
+                                ? report.quantity.toString()
+                                : report.quantity?.toString() || '0'} grams
+                            </div>
                             {getStatusBadge(report.status)}
                           </div>
                         </div>
@@ -403,7 +496,11 @@ export default function UserDashboard() {
                           <tr key={index} className="border-b hover:bg-gray-50">
                             <td className="py-3 px-4">{formatDate(report.reportTime)}</td>
                             <td className="py-3 px-4">{getPlasticTypeName(report.plasticType)}</td>
-                            <td className="py-3 px-4">{report.quantity?.toString() || '0'}</td>
+                            <td className="py-3 px-4">
+                              {typeof report.quantity === 'bigint'
+                                ? report.quantity.toString()
+                                : report.quantity?.toString() || '0'}
+                            </td>
                             <td className="py-3 px-4">{getStatusBadge(report.status)}</td>
                             <td className="py-3 px-4">
                               <button className="text-blue-600 hover:text-blue-800 text-sm">

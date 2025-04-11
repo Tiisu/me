@@ -34,17 +34,22 @@ const reportWaste = async (req, res) => {
       return res.status(400).json({ errors: errors.array() });
     }
 
-    const { plasticType, quantity, location, images } = req.body;
+    const { plasticType, quantity, location, images, qrCodeHash: providedQrCodeHash, walletAddress, description } = req.body;
     const userId = req.userId;
 
-    // Generate QR code hash
-    const timestamp = Date.now().toString();
-    const randomString = Math.random().toString(36).substring(2, 15);
-    const qrCodeHash = `${timestamp}-${randomString}`;
+    // Generate QR code hash if not provided
+    let qrCodeHash;
+    if (providedQrCodeHash) {
+      qrCodeHash = providedQrCodeHash;
+    } else {
+      const timestamp = Date.now().toString();
+      const randomString = Math.random().toString(36).substring(2, 15);
+      qrCodeHash = `${timestamp}-${randomString}`;
+    }
 
     // Generate QR code image
     const qrCodeDataUrl = await QRCode.toDataURL(qrCodeHash);
-    
+
     // Create new waste report
     const wasteReport = new WasteReport({
       user: userId,
@@ -54,7 +59,9 @@ const reportWaste = async (req, res) => {
       qrCodeImage: qrCodeDataUrl,
       status: 'reported',
       location: location || undefined,
-      images: images || []
+      images: images || [],
+      notes: description || 'Plastic waste collection',
+      walletAddress: walletAddress || null
     });
 
     await wasteReport.save();
@@ -72,7 +79,7 @@ const reportWaste = async (req, res) => {
           wasteVanABI,
           signer
         );
-        
+
         // Report waste on blockchain
         const tx = await wasteVanContract.reportWaste(
           plasticTypeMap[plasticType],
@@ -80,16 +87,16 @@ const reportWaste = async (req, res) => {
           qrCodeHash,
           { from: user.walletAddress }
         );
-        
+
         const receipt = await tx.wait();
-        
+
         // Update report with blockchain info
         wasteReport.blockchainTxHash = receipt.hash;
-        
+
         // Get report ID from events (this would need to be implemented based on your contract events)
         // const reportId = getReportIdFromReceipt(receipt);
         // wasteReport.reportId = reportId;
-        
+
         await wasteReport.save();
       } catch (error) {
         console.error('Blockchain report error:', error);
@@ -99,7 +106,8 @@ const reportWaste = async (req, res) => {
 
     res.status(201).json({
       message: 'Waste reported successfully',
-      report: wasteReport
+      report: wasteReport,
+      qrCodeUrl: wasteReport.qrCodeImage
     });
   } catch (error) {
     console.error('Report waste error:', error);
@@ -113,17 +121,17 @@ const reportWaste = async (req, res) => {
 const getWasteReports = async (req, res) => {
   try {
     const { status, plasticType, limit = 10, page = 1 } = req.query;
-    
+
     // Build query
     const query = {};
-    
+
     // Add filters if provided
     if (status) query.status = status;
     if (plasticType) query.plasticType = plasticType;
-    
+
     // Calculate pagination
     const skip = (parseInt(page) - 1) * parseInt(limit);
-    
+
     // Find waste reports
     const reports = await WasteReport.find(query)
       .populate('user', 'username email walletAddress')
@@ -131,10 +139,10 @@ const getWasteReports = async (req, res) => {
       .sort({ createdAt: -1 })
       .limit(parseInt(limit))
       .skip(skip);
-    
+
     // Count total reports
     const total = await WasteReport.countDocuments(query);
-    
+
     res.json({
       reports,
       pagination: {
@@ -156,15 +164,15 @@ const getWasteReports = async (req, res) => {
 const getWasteReportById = async (req, res) => {
   try {
     const reportId = req.params.id;
-    
+
     const report = await WasteReport.findById(reportId)
       .populate('user', 'username email walletAddress')
       .populate('assignedAgent', 'username email walletAddress');
-    
+
     if (!report) {
       return res.status(404).json({ message: 'Report not found' });
     }
-    
+
     res.json(report);
   } catch (error) {
     console.error('Get waste report error:', error);
@@ -178,20 +186,20 @@ const getWasteReportById = async (req, res) => {
 const getQRCode = async (req, res) => {
   try {
     const qrCodeHash = req.params.hash;
-    
+
     const report = await WasteReport.findOne({ qrCodeHash });
-    
+
     if (!report) {
       return res.status(404).json({ message: 'QR code not found' });
     }
-    
+
     // If QR code image doesn't exist, generate it
     if (!report.qrCodeImage) {
       const qrCodeDataUrl = await QRCode.toDataURL(qrCodeHash);
       report.qrCodeImage = qrCodeDataUrl;
       await report.save();
     }
-    
+
     res.json({
       qrCodeHash: report.qrCodeHash,
       qrCodeImage: report.qrCodeImage,
@@ -211,31 +219,31 @@ const collectWaste = async (req, res) => {
     const reportId = req.params.id;
     const agentId = req.agent._id;
     const userId = req.userId;
-    
+
     // Find report
     const report = await WasteReport.findById(reportId);
-    
+
     if (!report) {
       return res.status(404).json({ message: 'Report not found' });
     }
-    
+
     if (report.status !== 'reported') {
       return res.status(400).json({ message: 'Report has already been collected or processed' });
     }
-    
+
     // Update report
     report.status = 'collected';
     report.assignedAgent = userId;
     report.collectionTime = new Date();
-    
+
     await report.save();
-    
+
     // Update agent stats
     await Agent.findOneAndUpdate(
       { user: userId },
       { $inc: { totalCollections: 1 } }
     );
-    
+
     // If agent has wallet connected, collect on blockchain
     const agent = await User.findById(userId);
     if (agent.walletAddress && agent.isRegisteredOnChain) {
@@ -249,15 +257,15 @@ const collectWaste = async (req, res) => {
           wasteVanABI,
           signer
         );
-        
+
         // Collect waste on blockchain
         const tx = await wasteVanContract.collectWaste(
           report.qrCodeHash,
           { from: agent.walletAddress }
         );
-        
+
         const receipt = await tx.wait();
-        
+
         // Update report with blockchain info
         report.blockchainTxHash = receipt.hash;
         await report.save();
@@ -266,7 +274,7 @@ const collectWaste = async (req, res) => {
         // Continue even if blockchain collect fails
       }
     }
-    
+
     res.json({
       message: 'Waste collected successfully',
       report
@@ -285,38 +293,38 @@ const processWaste = async (req, res) => {
     const reportId = req.params.id;
     const agentId = req.agent._id;
     const userId = req.userId;
-    
+
     // Find report
     const report = await WasteReport.findById(reportId);
-    
+
     if (!report) {
       return res.status(404).json({ message: 'Report not found' });
     }
-    
+
     if (report.status !== 'collected') {
-      return res.status(400).json({ 
-        message: report.status === 'reported' 
-          ? 'Report must be collected before processing' 
+      return res.status(400).json({
+        message: report.status === 'reported'
+          ? 'Report must be collected before processing'
           : 'Report has already been processed'
       });
     }
-    
+
     if (report.assignedAgent.toString() !== userId.toString()) {
       return res.status(403).json({ message: 'Only the assigned agent can process this waste' });
     }
-    
+
     // Update report
     report.status = 'processed';
     report.processingTime = new Date();
-    
+
     await report.save();
-    
+
     // Update agent stats
     await Agent.findOneAndUpdate(
       { user: userId },
       { $inc: { totalProcessed: 1 } }
     );
-    
+
     // If agent has wallet connected, process on blockchain
     const agent = await User.findById(userId);
     if (agent.walletAddress && agent.isRegisteredOnChain && report.reportId) {
@@ -330,15 +338,15 @@ const processWaste = async (req, res) => {
           wasteVanABI,
           signer
         );
-        
+
         // Process waste on blockchain
         const tx = await wasteVanContract.processWaste(
           report.reportId,
           { from: agent.walletAddress }
         );
-        
+
         const receipt = await tx.wait();
-        
+
         // Update report with blockchain info
         report.blockchainTxHash = receipt.hash;
         await report.save();
@@ -347,7 +355,7 @@ const processWaste = async (req, res) => {
         // Continue even if blockchain process fails
       }
     }
-    
+
     res.json({
       message: 'Waste processed successfully',
       report
@@ -364,11 +372,11 @@ const processWaste = async (req, res) => {
 const getNearbyWasteReports = async (req, res) => {
   try {
     const { longitude, latitude, maxDistance = 10, status = 'reported' } = req.query;
-    
+
     if (!longitude || !latitude) {
       return res.status(400).json({ message: 'Longitude and latitude are required' });
     }
-    
+
     // Find nearby reports
     const reports = await WasteReport.find({
       status,
@@ -384,7 +392,7 @@ const getNearbyWasteReports = async (req, res) => {
     })
     .populate('user', 'username email walletAddress')
     .sort({ createdAt: -1 });
-    
+
     res.json(reports);
   } catch (error) {
     console.error('Get nearby waste reports error:', error);
