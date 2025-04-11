@@ -2,6 +2,7 @@
 
 import Link from 'next/link';
 import { useWeb3 } from '@/context/Web3Context';
+import NotificationBell from './NotificationBell';
 
 export default function Navbar() {
   const { userType, account } = useWeb3();
@@ -12,26 +13,31 @@ export default function Navbar() {
         <Link href="/" className="text-white text-xl font-bold">
           EcoConnect
         </Link>
-        
+
         <div className="flex items-center space-x-4">
           {userType === 'user' && (
             <Link href="/user" className="text-white hover:text-green-200">
               My Dashboard
             </Link>
           )}
-          
+
           {userType === 'agent' && (
             <Link href="/agent" className="text-white hover:text-green-200">
               Agent Dashboard
             </Link>
           )}
-          
+
           {userType === 'admin' && (
             <Link href="/admin" className="text-white hover:text-green-200">
               Admin Dashboard
             </Link>
           )}
-          
+
+          {/* Notification Bell - only show for logged in users */}
+          {(userType === 'user' || userType === 'agent' || userType === 'admin') && (
+            <NotificationBell />
+          )}
+
           {account && (
             <span className="text-white">
               {account.slice(0, 6)}...{account.slice(-4)}

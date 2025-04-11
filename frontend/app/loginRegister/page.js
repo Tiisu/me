@@ -7,13 +7,13 @@ import { useRouter } from 'next/navigation';
 const Login = () => {
   const {
     connectWallet,
+    connectWalletForRegistration,
     currentAccount,
     wasteVanContract,
     isRegistered,
     isAgent,
     registerUser,
     registerAgent,
-    login,
     registerWithBackend,
     user,
     loading: contextLoading
@@ -105,8 +105,22 @@ const Login = () => {
     setError('');
 
     try {
-      // Connect wallet - this will redirect to registration if needed
-      await connectWallet();
+      // For login, use the standard wallet connection flow
+      if (isLogin) {
+        try {
+          await connectWallet();
+        } catch (error) {
+          // If wallet not found, suggest registration
+          if (error.message && error.message.includes('Wallet not registered')) {
+            setError('Wallet not registered. Please switch to the Register tab.');
+          } else {
+            throw error; // Re-throw other errors
+          }
+        }
+      } else {
+        // For registration, use the dedicated function that doesn't redirect
+        await connectWalletForRegistration();
+      }
     } catch (error) {
       console.error('Wallet connection error:', error);
       setError(error.message || 'Failed to connect wallet. Please try again.');
@@ -115,56 +129,7 @@ const Login = () => {
     }
   };
 
-  const handleEmailLogin = async (e) => {
-    e.preventDefault();
-    if (loading || contextLoading) return;
-
-    // Form validation
-    const { email, password } = formData;
-
-    // Clear previous errors
-    setError('');
-
-    // Validate inputs
-    if (!email.trim()) {
-      setError('Email is required');
-      return;
-    }
-
-    if (!password.trim()) {
-      setError('Password is required');
-      return;
-    }
-
-    // Email format validation
-    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-    if (!emailRegex.test(email)) {
-      setError('Please enter a valid email address');
-      return;
-    }
-
-    // Password length validation
-    if (password.length < 6) {
-      setError('Password must be at least 6 characters long');
-      return;
-    }
-
-    setLoading(true);
-    console.log('Attempting login with:', { email, password: '******' });
-
-    try {
-      // Attempt login with validated credentials
-      await login(email, password);
-      console.log('Login successful, redirect should happen automatically');
-      // Redirect is handled in the login function
-    } catch (error) {
-      console.error('Login error in component:', error);
-      // Display the error message
-      setError(error.message || 'Invalid email or password');
-    } finally {
-      setLoading(false);
-    }
-  };
+  // We now only use wallet login, so email login is removed
 
   const handleRegister = async (e) => {
     e.preventDefault();
@@ -211,8 +176,20 @@ const Login = () => {
       return;
     }
 
+    // Wallet connection validation
+    if (!currentAccount) {
+      setError('Please connect your wallet before registering');
+      return;
+    }
+
     setLoading(true);
-    console.log('Starting registration process with data:', { username, email, password: '******', userType });
+    console.log('Starting registration process with data:', {
+      username,
+      email,
+      password: '******',
+      userType,
+      walletAddress: currentAccount
+    });
 
     try {
       // Register with backend using validated data
@@ -220,21 +197,22 @@ const Login = () => {
         username,
         email,
         password,
-        userType
+        userType,
+        walletAddress: currentAccount
       });
 
       console.log('Backend registration successful');
 
-      // If wallet is connected, register on blockchain
-      if (currentAccount && wasteVanContract) {
-        console.log('Registering on blockchain as:', userType);
-        if (userType === 'agent') {
-          await registerAgent();
-        } else {
-          await registerUser();
-        }
-        console.log('Blockchain registration successful');
+      // Register on blockchain based on user type
+      console.log('Registering on blockchain as:', userType);
+      if (userType === 'agent') {
+        await registerAgent();
+        // Show message about pending approval
+        alert('Your agent account has been created and is pending approval from administrators.');
+      } else {
+        await registerUser();
       }
+      console.log('Blockchain registration successful');
 
       // Redirect will happen in the registerWithBackend function
       console.log('Registration complete, redirect should happen automatically');
@@ -276,141 +254,170 @@ const Login = () => {
           </button>
         </div>
 
-        {/* Connect with wallet button */}
-        <div className="mb-6">
-          <button
-            onClick={handleConnectWallet}
-            disabled={loading || contextLoading}
-            className="w-full py-2 px-4 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors disabled:bg-gray-400"
-          >
-            {loading || contextLoading ? 'Connecting...' : 'Connect with Wallet'}
-          </button>
-        </div>
-
-        <div className="mb-6 text-center">
-          <span className="text-gray-500">OR</span>
-        </div>
-
-        {/* Login Form */}
         {isLogin ? (
-          <form onSubmit={handleEmailLogin}>
-            <div className="mb-4">
-              <label className="block text-gray-700 text-sm font-bold mb-2" htmlFor="email">
-                Email
-              </label>
-              <input
-                type="email"
-                id="email"
-                name="email"
-                value={formData.email}
-                onChange={handleChange}
-                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-green-500"
-                placeholder="Enter your email"
-                required
-              />
+          /* Login with wallet */
+          <div className="space-y-6">
+            <div className="text-center mb-4">
+              <p className="text-gray-600">Login with your connected wallet to access your account</p>
             </div>
 
             <div className="mb-6">
-              <label className="block text-gray-700 text-sm font-bold mb-2" htmlFor="password">
-                Password
-              </label>
-              <input
-                type="password"
-                id="password"
-                name="password"
-                value={formData.password}
-                onChange={handleChange}
-                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-green-500"
-                placeholder="Enter your password"
-                required
-              />
+              <button
+                onClick={handleConnectWallet}
+                disabled={loading || contextLoading}
+                className="w-full py-3 px-4 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors disabled:bg-gray-400 flex items-center justify-center"
+              >
+                {loading || contextLoading ? (
+                  <>
+                    <svg className="animate-spin -ml-1 mr-3 h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                    </svg>
+                    Connecting...
+                  </>
+                ) : currentAccount ? (
+                  <>
+                    <span className="mr-2">✓</span>
+                    Connected: {`${currentAccount.slice(0, 6)}...${currentAccount.slice(-4)}`}
+                  </>
+                ) : (
+                  'Connect Wallet to Login'
+                )}
+              </button>
             </div>
 
-            <button
-              type="submit"
-              disabled={loading || contextLoading}
-              className="w-full py-2 px-4 bg-green-600 text-white rounded-md hover:bg-green-700 transition-colors disabled:bg-gray-400"
-            >
-              {loading || contextLoading ? 'Logging in...' : 'Login'}
-            </button>
-          </form>
+            {currentAccount && (
+              <div className="text-center text-sm text-green-600">
+                <p>Wallet connected! You will be redirected to your dashboard if your account is found.</p>
+              </div>
+            )}
+          </div>
         ) : (
           /* Registration Form */
           <form onSubmit={handleRegister}>
-            <div className="mb-4">
-              <label className="block text-gray-700 text-sm font-bold mb-2" htmlFor="username">
-                Username
-              </label>
-              <input
-                type="text"
-                id="username"
-                name="username"
-                value={formData.username}
-                onChange={handleChange}
-                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-green-500"
-                placeholder="Choose a username"
-                required
-              />
+            <div className="text-center mb-4">
+              <p className="text-gray-600">First, connect your wallet to register</p>
             </div>
 
-            <div className="mb-4">
-              <label className="block text-gray-700 text-sm font-bold mb-2" htmlFor="email">
-                Email
-              </label>
-              <input
-                type="email"
-                id="email"
-                name="email"
-                value={formData.email}
-                onChange={handleChange}
-                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-green-500"
-                placeholder="Enter your email"
-                required
-              />
-            </div>
-
-            <div className="mb-4">
-              <label className="block text-gray-700 text-sm font-bold mb-2" htmlFor="password">
-                Password
-              </label>
-              <input
-                type="password"
-                id="password"
-                name="password"
-                value={formData.password}
-                onChange={handleChange}
-                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-green-500"
-                placeholder="Create a password"
-                required
-              />
-            </div>
-
+            {/* Connect wallet button for registration - now at the top */}
             <div className="mb-6">
-              <p className="text-gray-700 text-sm font-bold mb-2">User Type</p>
-              <div className="flex space-x-4">
-                <button
-                  type="button"
-                  onClick={() => handleUserTypeChange('regular')}
-                  className={`flex-1 py-2 px-4 rounded-md ${formData.userType === 'agent' ? 'bg-gray-200' : 'bg-green-600 text-white'}`}
-                >
-                  Regular User
-                </button>
-                <button
-                  type="button"
-                  onClick={() => handleUserTypeChange('agent')}
-                  className={`flex-1 py-2 px-4 rounded-md ${formData.userType === 'agent' ? 'bg-green-600 text-white' : 'bg-gray-200'}`}
-                >
-                  Agent
-                </button>
-              </div>
+              <button
+                type="button"
+                onClick={handleConnectWallet}
+                disabled={loading || contextLoading}
+                className="w-full py-3 px-4 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors disabled:bg-gray-400 flex items-center justify-center"
+              >
+                {loading || contextLoading ? (
+                  <>
+                    <svg className="animate-spin -ml-1 mr-3 h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                    </svg>
+                    Connecting...
+                  </>
+                ) : currentAccount ? (
+                  <>
+                    <span className="mr-2">✓</span>
+                    Connected: {`${currentAccount.slice(0, 6)}...${currentAccount.slice(-4)}`}
+                  </>
+                ) : (
+                  'Connect Wallet to Register'
+                )}
+              </button>
             </div>
+
+            {!currentAccount && (
+              <div className="text-center text-sm text-amber-600 mb-6">
+                <p>You must connect your wallet before you can register</p>
+              </div>
+            )}
+
+            {currentAccount && (
+              <>
+                <div className="mb-4">
+                  <label className="block text-gray-700 text-sm font-bold mb-2" htmlFor="username">
+                    Username
+                  </label>
+                  <input
+                    type="text"
+                    id="username"
+                    name="username"
+                    value={formData.username}
+                    onChange={handleChange}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-green-500"
+                    placeholder="Choose a username"
+                    required
+                  />
+                </div>
+
+                <div className="mb-4">
+                  <label className="block text-gray-700 text-sm font-bold mb-2" htmlFor="email">
+                    Email
+                  </label>
+                  <input
+                    type="email"
+                    id="email"
+                    name="email"
+                    value={formData.email}
+                    onChange={handleChange}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-green-500"
+                    placeholder="Enter your email"
+                    required
+                  />
+                </div>
+
+                <div className="mb-4">
+                  <label className="block text-gray-700 text-sm font-bold mb-2" htmlFor="password">
+                    Password
+                  </label>
+                  <input
+                    type="password"
+                    id="password"
+                    name="password"
+                    value={formData.password}
+                    onChange={handleChange}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-green-500"
+                    placeholder="Create a password"
+                    required
+                  />
+                </div>
+
+                <div className="mb-6">
+                  <p className="text-gray-700 text-sm font-bold mb-2">User Type</p>
+                  <div className="flex space-x-4">
+                    <button
+                      type="button"
+                      onClick={() => handleUserTypeChange('regular')}
+                      className={`flex-1 py-2 px-4 rounded-md ${formData.userType === 'agent' ? 'bg-gray-200' : 'bg-green-600 text-white'}`}
+                    >
+                      Regular User
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleUserTypeChange('agent')}
+                      className={`flex-1 py-2 px-4 rounded-md ${formData.userType === 'agent' ? 'bg-green-600 text-white' : 'bg-gray-200'}`}
+                    >
+                      Agent
+                    </button>
+                  </div>
+                  {formData.userType === 'agent' && (
+                    <p className="mt-2 text-sm text-amber-600">
+                      Note: Agent accounts require approval from administrators.
+                    </p>
+                  )}
+                </div>
+              </>
+            )}
 
             <button
               type="submit"
-              disabled={loading || contextLoading}
+              disabled={loading || contextLoading || !currentAccount || !formData.username || !formData.email || !formData.password}
               className="w-full py-2 px-4 bg-green-600 text-white rounded-md hover:bg-green-700 transition-colors disabled:bg-gray-400"
             >
-              {loading || contextLoading ? 'Registering...' : 'Register'}
+              {loading || contextLoading ? 'Registering...' :
+               !currentAccount ? 'Connect Wallet to Register' :
+               !formData.username || !formData.email || !formData.password ? 'Fill All Required Fields' :
+               'Register'}
             </button>
           </form>
         )}

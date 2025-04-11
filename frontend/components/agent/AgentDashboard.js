@@ -8,6 +8,7 @@ import { ethers } from 'ethers';
 import { AgentStatus } from '@/context/Constants';
 import CollectWasteForm from './CollectWasteForm';
 import ProcessWasteForm from './ProcessWasteForm';
+import RecentWasteReports from './RecentWasteReports';
 import { useRouter } from 'next/navigation';
 
 export default function AgentDashboard() {
@@ -199,6 +200,9 @@ export default function AgentDashboard() {
                 </div>
               </CardContent>
             </Card>
+
+            {/* Recent Waste Reports with Notifications */}
+            <RecentWasteReports />
 
             <Card>
               <CardHeader className="pb-2">

@@ -5,7 +5,7 @@ import { Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { EcoConnectContext } from '@/context/EcoConnect';
 
-export default function ConnectWallet({ onSuccess, className }) {
+export default function ConnectWallet({ onSuccess, className, children }) {
   const { connectWallet, currentAccount, loading } = useContext(EcoConnectContext);
 
   const handleConnect = async () => {
@@ -41,7 +41,7 @@ export default function ConnectWallet({ onSuccess, className }) {
           Connecting...
         </>
       ) : (
-        'Connect Wallet'
+        children || 'Connect Wallet'
       )}
     </Button>
   );

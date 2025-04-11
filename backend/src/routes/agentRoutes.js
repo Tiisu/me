@@ -18,9 +18,9 @@ router.post('/register', authMiddleware, agentController.registerAsAgent);
 router.post('/upload-documents', authMiddleware, agentController.uploadVerificationDocuments);
 
 // Admin routes for managing agents
-router.get('/pending', authMiddleware, adminMiddleware, agentController.getPendingAgents);
-router.put('/:id/approve', authMiddleware, adminMiddleware, agentController.approveAgent);
-router.put('/:id/reject', authMiddleware, adminMiddleware, agentController.rejectAgent);
-router.get('/all', authMiddleware, adminMiddleware, agentController.getAllAgents);
+router.get('/pending', adminMiddleware, agentController.getPendingAgents);
+router.put('/:id/approve', adminMiddleware, agentController.approveAgent);
+router.put('/:id/reject', adminMiddleware, agentController.rejectAgent);
+router.get('/all', adminMiddleware, agentController.getAllAgents);
 
 module.exports = router;

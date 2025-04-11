@@ -11,6 +11,8 @@ const userRoutes = require('./routes/userRoutes');
 const wasteRoutes = require('./routes/wasteRoutes');
 const agentRoutes = require('./routes/agentRoutes');
 const authRoutes = require('./routes/authRoutes');
+const notificationRoutes = require('./routes/notificationRoutes');
+const adminRoutes = require('./routes/adminRoutes');
 
 // Initialize Express app
 const app = express();
@@ -31,6 +33,8 @@ app.use('/api/users', userRoutes);
 app.use('/api/waste', wasteRoutes);
 app.use('/api/agents', agentRoutes);
 app.use('/api/auth', authRoutes);
+app.use('/api/notifications', notificationRoutes);
+app.use('/api/admin', adminRoutes);
 
 // Root route
 app.get('/', (req, res) => {

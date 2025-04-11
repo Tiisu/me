@@ -42,11 +42,11 @@ const Home = () => {
             Revolutionizing Waste Management
           </h1>
           <p className="mb-8 text-xl text-gray-600 max-w-2xl mx-auto">
-            Join our blockchain-powered platform that rewards you for responsible waste disposal. 
+            Join our blockchain-powered platform that rewards you for responsible waste disposal.
             Make an impact while earning rewards for your recycling efforts.
           </p>
           <div className="flex gap-4 justify-center">
-            <ConnectWallet 
+            <ConnectWallet
               onSuccess={handleConnectSuccess}
               className="inline-flex items-center px-6 py-3 bg-green-600 text-white font-semibold rounded-lg hover:bg-green-700 transition-colors"
             />
@@ -109,10 +109,13 @@ const Home = () => {
         <p className="mb-8 text-xl text-gray-600 max-w-2xl mx-auto">
           Join our platform today and start contributing to a cleaner, more sustainable future while earning rewards.
         </p>
-        <button className="inline-flex items-center px-8 py-4 bg-green-600 text-white font-semibold rounded-lg hover:bg-green-700 transition-colors">
-          <Link href="/loginRegister">Start Recycling Now</Link>
+        <ConnectWallet
+          onSuccess={handleConnectSuccess}
+          className="inline-flex items-center px-8 py-4 bg-green-600 text-white font-semibold rounded-lg hover:bg-green-700 transition-colors"
+        >
+          Connect Wallet to Start
           <ArrowRight className="ml-2 h-5 w-5" />
-        </button>
+        </ConnectWallet>
       </section>
     </div>
   );

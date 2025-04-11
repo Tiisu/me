@@ -17,6 +17,8 @@ import {
 
 export const EcoConnectContext = createContext({
   connectWallet: async () => {},
+  connectWalletInternal: async () => {},
+  connectWalletForRegistration: async () => {}, // New function specifically for registration
   currentAccount: "",
   loading: false,
   wasteVanContract: null,
@@ -127,25 +129,70 @@ export const EcoConnectProvider = ({ children }) => {
   }, []);
 
   // Function to check user registration status
-  const checkUserStatus = async (contract, address) => {
+  const checkUserStatus = async (contract, address, skipRedirect = false) => {
     try {
       if (contract && address) {
         const user = await contract.users(address);
-        setIsRegistered(user.isRegistered);
-        setIsAgent(user.userType === UserType.Agent);
+        const isUserRegistered = user.isRegistered;
+        const isUserAgent = user.userType === UserType.Agent;
 
-        if (user.userType === UserType.Agent) {
-          const agent = await contract.agents(address);
-          setAgentStatus(agent.status);
+        // Only update state if we're not in the registration process
+        if (!skipRedirect) {
+          setIsRegistered(isUserRegistered);
+          setIsAgent(isUserAgent);
+
+          if (isUserAgent) {
+            const agent = await contract.agents(address);
+            setAgentStatus(agent.status);
+          }
         }
+
+        // Return the status without updating state if skipRedirect is true
+        return {
+          isRegistered: isUserRegistered,
+          isAgent: isUserAgent
+        };
       }
     } catch (error) {
       console.error("Error checking user status:", error);
     }
+
+    return {
+      isRegistered: false,
+      isAgent: false
+    };
+  };
+
+  // Function specifically for registration - just connects wallet without any redirects or checks
+  const connectWalletForRegistration = async () => {
+    try {
+      if (!window.ethereum) {
+        throw new Error("Please install MetaMask to use this application");
+      }
+
+      // Request account access
+      const accounts = await window.ethereum.request({
+        method: 'eth_requestAccounts'
+      });
+
+      if (!accounts || accounts.length === 0) {
+        throw new Error("No accounts found. Please make sure MetaMask is unlocked.");
+      }
+
+      const userAddress = accounts[0];
+
+      // Just set the current account without any other checks or redirects
+      setCurrentAccount(userAddress);
+
+      return userAddress;
+    } catch (error) {
+      console.error("Failed to connect wallet for registration:", error);
+      throw error;
+    }
   };
 
   // Internal function to connect wallet without checking backend
-  const connectWalletInternal = async (address) => {
+  const connectWalletInternal = async (address, skipRedirect = false) => {
     try {
       if (!window.ethereum) {
         throw new Error("Please install MetaMask to use this application");
@@ -175,7 +222,8 @@ export const EcoConnectProvider = ({ children }) => {
       setWasteVanTokenContract(wasteVanTokenContract);
 
       // Check if user is registered on blockchain
-      await checkUserStatus(wasteVanContract, userAddress);
+      // Pass skipRedirect to prevent state updates during registration
+      const status = await checkUserStatus(wasteVanContract, userAddress, skipRedirect);
 
       return userAddress;
     } catch (error) {
@@ -226,9 +274,26 @@ export const EcoConnectProvider = ({ children }) => {
           router.push('/userDashboard');
         }
       } catch (error) {
-        // If wallet not registered in backend, redirect to registration
-        console.log("Wallet not registered in backend, redirecting to registration");
-        router.push('/loginRegister');
+        console.error("Wallet verification error:", error);
+
+        // Check if this is an agent approval error
+        if (error.response && error.response.status === 403 &&
+            error.response.data && error.response.data.agentStatus) {
+          // This is an agent waiting for approval
+          alert(error.response.data.message || 'Your agent account is pending approval');
+          router.push('/loginRegister');
+        } else if (error.response && error.response.status === 404) {
+          // If wallet not registered in backend, redirect to registration
+          console.log("Wallet not registered in backend, redirecting to registration");
+          router.push('/loginRegister');
+          return userAddress; // Return address but don't throw error
+        } else {
+          // Other errors
+          const errorMsg = 'Error connecting wallet: ' + (error.response?.data?.message || error.message || 'Unknown error');
+          console.error(errorMsg);
+          router.push('/loginRegister');
+          return userAddress; // Return address but don't throw error
+        }
       }
 
       return userAddress;
@@ -358,9 +423,18 @@ export const EcoConnectProvider = ({ children }) => {
         throw new Error('All fields are required');
       }
 
-      console.log('Registering user with data:', { ...userData, password: '******' });
+      // Validate wallet address for registration
+      if (!userData.walletAddress) {
+        throw new Error('Wallet connection is required for registration');
+      }
 
-      // Make the API call
+      console.log('Registering user with data:', {
+        ...userData,
+        password: '******',
+        walletAddress: userData.walletAddress
+      });
+
+      // Make the API call with wallet address included
       let response;
       try {
         response = await api.auth.register(userData);
@@ -390,19 +464,9 @@ export const EcoConnectProvider = ({ children }) => {
       setIsRegistered(true);
       setIsAgent(response.user.userType === 'agent');
 
-      // If wallet is connected, associate it with the user
-      if (currentAccount) {
-        try {
-          console.log('Connecting wallet to user account:', currentAccount);
-          await api.auth.connectWallet({ walletAddress: currentAccount });
-
-          // Update user object with wallet address
-          const updatedUser = { ...response.user, walletAddress: currentAccount };
-          setUser(updatedUser);
-          localStorage.setItem('user', JSON.stringify(updatedUser));
-        } catch (error) {
-          console.error("Failed to connect wallet to user:", error);
-        }
+      // Set agent status if applicable
+      if (response.user.userType === 'agent') {
+        setAgentStatus(response.user.agentStatus || 'pending');
       }
 
       // Redirect to appropriate dashboard
@@ -625,6 +689,8 @@ export const EcoConnectProvider = ({ children }) => {
     <EcoConnectContext.Provider
       value={{
         connectWallet,
+        connectWalletInternal,
+        connectWalletForRegistration,
         currentAccount,
         loading,
         wasteVanContract,

@@ -5,6 +5,7 @@ const WasteReport = require('../models/WasteReport');
 const User = require('../models/User');
 const Agent = require('../models/Agent');
 const wasteVanABI = require('../config/wasteVanABI.json');
+const { createWasteReportNotifications } = require('./notificationController');
 
 // Map blockchain enum values to database strings
 const plasticTypeMap = {
@@ -102,6 +103,15 @@ const reportWaste = async (req, res) => {
         console.error('Blockchain report error:', error);
         // Continue even if blockchain report fails
       }
+    }
+
+    // Create notifications for agents about the new waste report
+    try {
+      await createWasteReportNotifications(wasteReport, user);
+      console.log('Waste report notifications created successfully');
+    } catch (notificationError) {
+      console.error('Failed to create waste report notifications:', notificationError);
+      // Continue even if notification creation fails
     }
 
     res.status(201).json({

@@ -14,7 +14,7 @@ const register = async (req, res) => {
       return res.status(400).json({ errors: errors.array() });
     }
 
-    const { username, email, password, userType } = req.body;
+    const { username, email, password, userType, walletAddress } = req.body;
 
     // Check if user already exists
     const existingUser = await User.findOne({ email });
@@ -22,15 +22,35 @@ const register = async (req, res) => {
       return res.status(400).json({ message: 'User already exists with this email' });
     }
 
+    // Check if wallet address is already in use
+    if (walletAddress) {
+      const existingWallet = await User.findOne({ walletAddress });
+      if (existingWallet) {
+        return res.status(400).json({ message: 'This wallet address is already registered' });
+      }
+    }
+
     // Create new user
     const user = new User({
       username,
       email,
       password,
-      userType
+      userType,
+      walletAddress
     });
 
     await user.save();
+
+    // If user is an agent, create agent record
+    if (userType === 'agent') {
+      const agent = new Agent({
+        user: user._id,
+        walletAddress,
+        status: 'pending'
+      });
+
+      await agent.save();
+    }
 
     // Generate JWT token
     const token = jwt.sign(
@@ -46,7 +66,9 @@ const register = async (req, res) => {
         id: user._id,
         username: user.username,
         email: user.email,
-        userType: user.userType
+        userType: user.userType,
+        walletAddress: user.walletAddress,
+        agentStatus: userType === 'agent' ? 'pending' : null
       }
     });
   } catch (error) {
@@ -196,6 +218,14 @@ const verifyWallet = async (req, res) => {
       const agent = await Agent.findOne({ user: user._id });
       if (agent) {
         agentStatus = agent.status;
+
+        // If agent is not approved, deny login
+        if (agentStatus !== 'approved') {
+          return res.status(403).json({
+            message: 'Your agent account is pending approval. Please wait for an administrator to approve your account.',
+            agentStatus
+          });
+        }
       }
     }
 

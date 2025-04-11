@@ -1,19 +1,29 @@
+// Admin credentials
+const ADMIN_USERNAME = 'Tiisu';
+const ADMIN_PASSWORD = 'Ghana';
+
 /**
  * Middleware to verify if the authenticated user is an admin
  */
-const adminMiddleware = (req, res, next) => {
+const adminMiddleware = async (req, res, next) => {
   try {
-    // Check if user exists (should be attached by authMiddleware)
-    if (!req.user) {
-      return res.status(401).json({ message: 'Authentication required' });
+    // Get admin credentials from request headers
+    const adminUsername = req.headers['admin-username'];
+    const adminPassword = req.headers['admin-password'];
+
+    // Check if admin credentials are provided
+    if (!adminUsername || !adminPassword) {
+      return res.status(401).json({ message: 'Admin credentials required' });
     }
-    
-    // Check if user is an admin
-    if (req.user.userType !== 'admin') {
-      return res.status(403).json({ message: 'Admin access required' });
+
+    // Verify admin credentials
+    if (adminUsername === ADMIN_USERNAME && adminPassword === ADMIN_PASSWORD) {
+      // Admin credentials are valid
+      return next();
     }
-    
-    next();
+
+    // If we get here, the admin credentials are invalid
+    return res.status(403).json({ message: 'Invalid admin credentials' });
   } catch (error) {
     console.error('Admin middleware error:', error);
     res.status(500).json({ message: 'Server error' });
