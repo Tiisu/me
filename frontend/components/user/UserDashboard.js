@@ -1,11 +1,12 @@
 'use client';
 
 import { useState, useEffect, useContext } from 'react';
-import { Loader2, Recycle, Coins, Clock, CheckCircle, AlertCircle, ArrowUpDown } from 'lucide-react';
+import { Loader2, Recycle, Coins, Clock, CheckCircle, AlertCircle, ArrowUpDown, QrCode } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { EcoConnectContext } from '@/context/EcoConnect';
 import { ethers } from 'ethers';
 import ReportWasteForm from './ReportWasteForm';
+import QRCodeModal from '../common/QRCodeModal';
 import api from '@/services/api';
 import { useRouter } from 'next/navigation';
 
@@ -31,6 +32,9 @@ export default function UserDashboard() {
   const [activeTab, setActiveTab] = useState('overview');
   const [contractError, setContractError] = useState(false);
   const [isMounted, setIsMounted] = useState(false);
+  const [qrCodeModalOpen, setQrCodeModalOpen] = useState(false);
+  const [selectedQrCode, setSelectedQrCode] = useState(null);
+  const [loadingQrCode, setLoadingQrCode] = useState(false);
 
   // Handle client-side only code
   useEffect(() => {
@@ -367,6 +371,31 @@ export default function UserDashboard() {
     );
   }
 
+  // Function to handle viewing QR code
+  const handleViewQrCode = async (qrCodeHash) => {
+    if (!qrCodeHash) return;
+
+    setLoadingQrCode(true);
+    setSelectedQrCode(null);
+    setQrCodeModalOpen(true);
+
+    try {
+      console.log('Fetching QR code for hash:', qrCodeHash);
+      const response = await api.waste.getQRCode(qrCodeHash);
+      console.log('QR code response:', response);
+      setSelectedQrCode(response);
+    } catch (error) {
+      console.error('Failed to fetch QR code:', error);
+      // Create a fallback QR code with just the hash
+      setSelectedQrCode({
+        qrCodeHash: qrCodeHash,
+        qrCodeImage: null
+      });
+    } finally {
+      setLoadingQrCode(false);
+    }
+  };
+
   return (
     <div className="space-y-8">
       <h1 className="text-3xl font-bold">User Dashboard</h1>
@@ -494,7 +523,16 @@ export default function UserDashboard() {
                                 ? report.quantity.toString()
                                 : report.quantity?.toString() || '0'} grams
                             </div>
-                            {getStatusBadge(report.status)}
+                            <div className="flex items-center space-x-2 justify-end">
+                              {getStatusBadge(report.status)}
+                              <button
+                                className="text-blue-600 hover:text-blue-800 text-xs flex items-center"
+                                onClick={() => handleViewQrCode(report.qrCodeHash)}
+                              >
+                                <QrCode className="h-3 w-3 mr-1" />
+                                QR
+                              </button>
+                            </div>
                           </div>
                         </div>
                       ))}
@@ -555,7 +593,11 @@ export default function UserDashboard() {
                             </td>
                             <td className="py-3 px-4">{getStatusBadge(report.status)}</td>
                             <td className="py-3 px-4">
-                              <button className="text-blue-600 hover:text-blue-800 text-sm">
+                              <button
+                                className="text-blue-600 hover:text-blue-800 text-sm flex items-center"
+                                onClick={() => handleViewQrCode(report.qrCodeHash)}
+                              >
+                                <QrCode className="h-3 w-3 mr-1" />
                                 View QR
                               </button>
                             </td>
@@ -579,6 +621,14 @@ export default function UserDashboard() {
           )}
         </>
       )}
+
+      {/* QR Code Modal */}
+      <QRCodeModal
+        isOpen={qrCodeModalOpen}
+        onClose={() => setQrCodeModalOpen(false)}
+        qrCodeData={selectedQrCode}
+        isLoading={loadingQrCode}
+      />
     </div>
   );
 }

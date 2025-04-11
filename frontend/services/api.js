@@ -95,6 +95,20 @@ export const wasteService = {
     return response.data;
   },
 
+  getQRCode: async (qrCodeHash) => {
+    try {
+      const response = await api.get(`/waste/qrcode/${qrCodeHash}`);
+      return response.data;
+    } catch (error) {
+      console.error('Error fetching QR code:', error);
+      // If backend fails, generate a QR code on the client side
+      return {
+        qrCodeHash,
+        qrCodeImage: `https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${qrCodeHash}`
+      };
+    }
+  },
+
   getWasteReports: async (params = {}) => {
     const response = await api.get('/waste/reports', { params });
     return response.data;
@@ -105,10 +119,7 @@ export const wasteService = {
     return response.data;
   },
 
-  getQRCode: async (hash) => {
-    const response = await api.get(`/waste/qrcode/${hash}`);
-    return response.data;
-  },
+
 
   collectWaste: async (id) => {
     const response = await api.post(`/waste/collect/${id}`);
