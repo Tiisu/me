@@ -35,6 +35,7 @@ export default function UserDashboard() {
   const [qrCodeModalOpen, setQrCodeModalOpen] = useState(false);
   const [selectedQrCode, setSelectedQrCode] = useState(null);
   const [loadingQrCode, setLoadingQrCode] = useState(false);
+  const [refreshTrigger, setRefreshTrigger] = useState(0); // Used to trigger refreshes
 
   // Handle client-side only code
   useEffect(() => {
@@ -278,7 +279,7 @@ export default function UserDashboard() {
     if (isMounted) {
       fetchUserData();
     }
-  }, [currentAccount, wasteVanContract, getUserTokenBalance, getWasteReportsByStatus, user, connectWallet, isMounted]);
+  }, [currentAccount, wasteVanContract, getUserTokenBalance, getWasteReportsByStatus, user, connectWallet, isMounted, refreshTrigger]);
 
   // Helper function to format date from timestamp
   const formatDate = (timestamp) => {
@@ -399,6 +400,13 @@ export default function UserDashboard() {
       </div>
     );
   }
+
+  // Function to handle waste report updates
+  const handleWasteReportUpdate = () => {
+    console.log('Waste report updated, refreshing data...');
+    // Trigger a refresh of the user dashboard data
+    setRefreshTrigger(prev => prev + 1);
+  };
 
   // Function to handle viewing QR code
   const handleViewQrCode = async (qrCodeHash) => {
@@ -654,7 +662,7 @@ export default function UserDashboard() {
           {activeTab === 'report' && (
             <Card>
               <CardContent className="p-6">
-                <ReportWasteForm />
+                <ReportWasteForm onWasteReported={handleWasteReportUpdate} />
               </CardContent>
             </Card>
           )}

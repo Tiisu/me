@@ -3,6 +3,7 @@
 import React, { useState, useContext, useEffect } from 'react';
 import { EcoConnectContext } from '../../context/EcoConnect';
 import { useRouter } from 'next/navigation';
+import AgentApprovalStatus from '@/components/shared/AgentApprovalStatus';
 
 const Login = () => {
   const {
@@ -16,7 +17,8 @@ const Login = () => {
     registerAgent,
     registerWithBackend,
     user,
-    loading: contextLoading
+    loading: contextLoading,
+    agentStatus
   } = useContext(EcoConnectContext);
   const router = useRouter();
   const [loading, setLoading] = useState(false);
@@ -227,6 +229,9 @@ const Login = () => {
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-gray-100">
+      {/* Show agent approval status if applicable */}
+      {agentStatus && <AgentApprovalStatus status={agentStatus} />}
+
       <div className="bg-white p-8 rounded-lg shadow-md w-full max-w-md">
         <h2 className="text-2xl font-bold mb-6 text-center text-green-600">
           {isLogin ? 'Login' : 'Register'}

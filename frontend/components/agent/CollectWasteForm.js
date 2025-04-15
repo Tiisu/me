@@ -7,36 +7,42 @@ import { Input } from '@/components/ui/input';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { EcoConnectContext } from '@/context/EcoConnect';
 
-export default function CollectWasteForm() {
+export default function CollectWasteForm({ onWasteCollected }) {
   const { collectWaste, loading: contextLoading } = useContext(EcoConnectContext);
-  
+
   const [qrCodeHash, setQrCodeHash] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState(false);
-  
+
   const handleSubmit = async (e) => {
     e.preventDefault();
-    
+
     if (loading || contextLoading) return;
-    
+
     // Validate form
     if (!qrCodeHash) {
       setError('Please enter a QR code hash');
       return;
     }
-    
+
     setLoading(true);
     setError('');
     setSuccess(false);
-    
+
     try {
       // Call the contract function
       await collectWaste(qrCodeHash);
-      
+
       setSuccess(true);
       setQrCodeHash('');
-      
+
+      // Notify parent component about the waste collection
+      if (onWasteCollected) {
+        console.log('Calling onWasteCollected callback');
+        onWasteCollected();
+      }
+
     } catch (error) {
       console.error('Failed to collect waste:', error);
       setError(error.message || 'Failed to collect waste. Please try again.');
@@ -44,7 +50,7 @@ export default function CollectWasteForm() {
       setLoading(false);
     }
   };
-  
+
   return (
     <div className="space-y-6">
       <div className="text-center">
@@ -53,14 +59,14 @@ export default function CollectWasteForm() {
           Scan or enter the QR code hash to collect waste
         </p>
       </div>
-      
+
       {error && (
         <Alert variant="destructive">
           <AlertCircle className="h-4 w-4" />
           <AlertDescription>{error}</AlertDescription>
         </Alert>
       )}
-      
+
       {success && (
         <Alert className="bg-green-50 border-green-200">
           <AlertDescription className="text-green-700">
@@ -68,7 +74,7 @@ export default function CollectWasteForm() {
           </AlertDescription>
         </Alert>
       )}
-      
+
       <form onSubmit={handleSubmit} className="space-y-4">
         <div className="space-y-2">
           <label className="text-sm font-medium">QR Code Hash</label>
@@ -89,7 +95,7 @@ export default function CollectWasteForm() {
             Enter the QR code hash or scan the QR code provided by the user
           </p>
         </div>
-        
+
         <Button
           type="submit"
           className="w-full"

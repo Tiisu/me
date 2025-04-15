@@ -5,6 +5,8 @@ import { ethers } from "ethers";
 import { useRouter } from 'next/navigation';
 import api, { auth } from '../services/api';
 import InsufficientFundsModal from '../components/shared/InsufficientFundsModal';
+import RegistrationRequiredModal from '../components/shared/RegistrationRequiredModal';
+import AgentApprovalNotification from '../components/shared/AgentApprovalNotification';
 import {
   WASTE_VAN_ADDRESS,
   WASTE_VAN_TOKEN_ADDRESS,
@@ -37,14 +39,20 @@ export const EcoConnectContext = createContext({
   reportWaste: async () => {},
   collectWaste: async () => {},
   processWaste: async () => {},
+  purchasePoints: async () => {}, // New function for purchasing points
   getWasteReportsByStatus: async () => {},
   getUserTokenBalance: async () => {},
   getAgentStats: async () => {},
+  getPointCost: async () => {}, // New function to get the current point cost
   login: async () => {},
   logout: async () => {},
   registerWithBackend: async () => {},
   showInsufficientFundsModal: false,
   setShowInsufficientFundsModal: () => {},
+  showRegistrationRequiredModal: false,
+  setShowRegistrationRequiredModal: () => {},
+  showAgentApprovalNotification: false,
+  setShowAgentApprovalNotification: () => {},
 });
 
 export const EcoConnectProvider = ({ children }) => {
@@ -64,6 +72,8 @@ export const EcoConnectProvider = ({ children }) => {
 
   // Modal states
   const [showInsufficientFundsModal, setShowInsufficientFundsModal] = useState(false);
+  const [showRegistrationRequiredModal, setShowRegistrationRequiredModal] = useState(false);
+  const [showAgentApprovalNotification, setShowAgentApprovalNotification] = useState(false);
 
   // Check if user is already authenticated
   useEffect(() => {
@@ -158,8 +168,23 @@ export const EcoConnectProvider = ({ children }) => {
             setIsAgent(isUserAgent);
 
             if (isUserAgent) {
+              // Get agent status from blockchain
               const agent = await contract.agents(address);
               setAgentStatus(agent.status);
+              console.log('Agent status from blockchain:', agent.status);
+            } else {
+              // Check if we have agent status from backend
+              try {
+                const userData = JSON.parse(localStorage.getItem('user'));
+                if (userData && userData.userType === 'agent' && userData.agentStatus) {
+                  console.log('Agent status from backend:', userData.agentStatus);
+                  // If backend says user is an agent, trust that
+                  setIsAgent(true);
+                  setAgentStatus(userData.agentStatus);
+                }
+              } catch (error) {
+                console.error('Error parsing user data for agent status:', error);
+              }
             }
           }
         } catch (contractError) {
@@ -169,11 +194,35 @@ export const EcoConnectProvider = ({ children }) => {
           // Only update state if we're not in the registration process
           if (!skipRedirect) {
             setIsRegistered(isBackendAuthenticated);
+
+            // Check if we have agent status from backend
+            try {
+              const userData = JSON.parse(localStorage.getItem('user'));
+              if (userData && userData.userType === 'agent') {
+                console.log('Agent status from backend (fallback):', userData.agentStatus);
+                setIsAgent(true);
+                setAgentStatus(userData.agentStatus);
+              }
+            } catch (error) {
+              console.error('Error parsing user data for agent status (fallback):', error);
+            }
           }
         }
       } else if (!skipRedirect) {
         // If no contract or address, just use backend authentication
         setIsRegistered(isBackendAuthenticated);
+
+        // Check if we have agent status from backend
+        try {
+          const userData = JSON.parse(localStorage.getItem('user'));
+          if (userData && userData.userType === 'agent') {
+            console.log('Agent status from backend (no contract):', userData.agentStatus);
+            setIsAgent(true);
+            setAgentStatus(userData.agentStatus);
+          }
+        } catch (error) {
+          console.error('Error parsing user data for agent status (no contract):', error);
+        }
       }
 
       // Return the status
@@ -383,10 +432,116 @@ export const EcoConnectProvider = ({ children }) => {
           }
         }
 
-        // Redirect to appropriate dashboard
+        // Check agent status before redirecting
         if (response.user.userType === 'agent') {
-          router.push('/agentDashboard');
+          // If agent is not approved, show notification and stay on login page
+          if (response.user.agentStatus === 'pending') {
+            setAgentStatus('pending');
+
+            // Show agent status notification
+            const message = 'Your agent account is pending approval from administrators.';
+            console.log('Agent status: pending', message);
+
+            // Use our AgentApprovalStatus component
+            const agentStatusElement = document.createElement('div');
+            agentStatusElement.id = 'agent-status-notification';
+            agentStatusElement.innerHTML = `
+              <div class="fixed bottom-4 right-4 max-w-md p-4 rounded-lg shadow-lg border bg-yellow-50 border-yellow-200 text-yellow-800">
+                <div class="flex items-start">
+                  <div class="flex-1">
+                    <h3 class="font-medium text-lg">Agent Account Pending Approval</h3>
+                    <p class="mt-1">${message}</p>
+                    <button class="mt-3 px-3 py-1.5 bg-gray-200 text-gray-800 rounded-md hover:bg-gray-300 focus:outline-none focus:ring-2 focus:ring-gray-400">
+                      Dismiss
+                    </button>
+                  </div>
+                </div>
+              </div>
+            `;
+
+            // Remove any existing notification
+            const existingNotification = document.getElementById('agent-status-notification');
+            if (existingNotification) {
+              existingNotification.remove();
+            }
+
+            // Add the notification to the body
+            document.body.appendChild(agentStatusElement);
+
+            // Add event listener to the dismiss button
+            const dismissButton = agentStatusElement.querySelector('button');
+            if (dismissButton) {
+              dismissButton.addEventListener('click', () => {
+                agentStatusElement.remove();
+              });
+            }
+
+            // Auto-remove after 10 seconds
+            setTimeout(() => {
+              if (document.body.contains(agentStatusElement)) {
+                agentStatusElement.remove();
+              }
+            }, 10000);
+
+            // Stay on login page
+            router.push('/loginRegister');
+          } else if (response.user.agentStatus === 'rejected') {
+            // If agent is rejected, show notification and stay on login page
+            setAgentStatus('rejected');
+
+            // Show agent status notification
+            const message = 'Your agent application has been rejected. Please contact support for more information.';
+            console.log('Agent status: rejected', message);
+
+            // Use our AgentApprovalStatus component
+            const agentStatusElement = document.createElement('div');
+            agentStatusElement.id = 'agent-status-notification';
+            agentStatusElement.innerHTML = `
+              <div class="fixed bottom-4 right-4 max-w-md p-4 rounded-lg shadow-lg border bg-red-50 border-red-200 text-red-800">
+                <div class="flex items-start">
+                  <div class="flex-1">
+                    <h3 class="font-medium text-lg">Agent Account Rejected</h3>
+                    <p class="mt-1">${message}</p>
+                    <button class="mt-3 px-3 py-1.5 bg-gray-200 text-gray-800 rounded-md hover:bg-gray-300 focus:outline-none focus:ring-2 focus:ring-gray-400">
+                      Dismiss
+                    </button>
+                  </div>
+                </div>
+              </div>
+            `;
+
+            // Remove any existing notification
+            const existingNotification = document.getElementById('agent-status-notification');
+            if (existingNotification) {
+              existingNotification.remove();
+            }
+
+            // Add the notification to the body
+            document.body.appendChild(agentStatusElement);
+
+            // Add event listener to the dismiss button
+            const dismissButton = agentStatusElement.querySelector('button');
+            if (dismissButton) {
+              dismissButton.addEventListener('click', () => {
+                agentStatusElement.remove();
+              });
+            }
+
+            // Auto-remove after 10 seconds
+            setTimeout(() => {
+              if (document.body.contains(agentStatusElement)) {
+                agentStatusElement.remove();
+              }
+            }, 10000);
+
+            // Stay on login page
+            router.push('/loginRegister');
+          } else {
+            // Agent is approved, redirect to agent dashboard
+            router.push('/agentDashboard');
+          }
         } else {
+          // Regular user, redirect to user dashboard
           router.push('/userDashboard');
         }
       } catch (error) {
@@ -396,7 +551,53 @@ export const EcoConnectProvider = ({ children }) => {
         if (error.response && error.response.status === 403 &&
             error.response.data && error.response.data.agentStatus) {
           // This is an agent waiting for approval
-          alert(error.response.data.message || 'Your agent account is pending approval');
+          setAgentStatus(error.response.data.agentStatus);
+
+          // Show a more user-friendly notification instead of alert
+          const message = error.response.data.message || 'Your agent account is pending approval';
+          console.log('Agent status:', error.response.data.agentStatus, message);
+
+          // Create a notification element to show the agent status
+          const agentStatusElement = document.createElement('div');
+          agentStatusElement.id = 'agent-status-notification';
+          agentStatusElement.innerHTML = `
+            <div class="fixed bottom-4 right-4 max-w-md p-4 rounded-lg shadow-lg border bg-yellow-50 border-yellow-200 text-yellow-800">
+              <div class="flex items-start">
+                <div class="flex-1">
+                  <h3 class="font-medium text-lg">Agent Account Pending Approval</h3>
+                  <p class="mt-1">${message}</p>
+                  <button class="mt-3 px-3 py-1.5 bg-gray-200 text-gray-800 rounded-md hover:bg-gray-300 focus:outline-none focus:ring-2 focus:ring-gray-400">
+                    Dismiss
+                  </button>
+                </div>
+              </div>
+            </div>
+          `;
+
+          // Remove any existing notification
+          const existingNotification = document.getElementById('agent-status-notification');
+          if (existingNotification) {
+            existingNotification.remove();
+          }
+
+          // Add the notification to the body
+          document.body.appendChild(agentStatusElement);
+
+          // Add event listener to the dismiss button
+          const dismissButton = agentStatusElement.querySelector('button');
+          if (dismissButton) {
+            dismissButton.addEventListener('click', () => {
+              agentStatusElement.remove();
+            });
+          }
+
+          // Auto-remove after 10 seconds
+          setTimeout(() => {
+            if (document.body.contains(agentStatusElement)) {
+              agentStatusElement.remove();
+            }
+          }, 10000);
+
           router.push('/loginRegister');
         } else if (error.response && error.response.status === 404) {
           // If wallet not registered in backend, redirect to registration
@@ -1015,40 +1216,15 @@ export const EcoConnectProvider = ({ children }) => {
         throw new Error("User not registered. Please register before reporting waste.");
       }
 
-      // If user is authenticated with backend but not registered on blockchain, register them
+      // If user is authenticated with backend but not registered on blockchain, show registration modal
       if (!isBlockchainAuthenticated && isBackendAuthenticated) {
-        console.warn('User is authenticated with backend but not registered on blockchain. Attempting to register on blockchain...');
+        console.warn('User is authenticated with backend but not registered on blockchain.');
 
-        try {
-          // Try to register the user on the blockchain
-          if (wasteVanContract) {
-            // Check if the registerUser function exists on the contract
-            if (typeof wasteVanContract.registerUser === 'function') {
-              console.log('Registering user on blockchain...');
-              const tx = await wasteVanContract.registerUser();
-              await tx.wait();
-              console.log('User registered on blockchain successfully!');
+        // Show registration required modal
+        setShowRegistrationRequiredModal(true);
 
-              // Update registration status
-              setIsRegistered(true);
-
-              // Verify registration was successful
-              const user = await wasteVanContract.users(currentAccount);
-              if (!user.isRegistered) {
-                throw new Error('Blockchain registration verification failed. User still not registered.');
-              }
-
-              console.log('Blockchain registration verified successfully!');
-            } else {
-              throw new Error('registerUser function not found on contract.');
-            }
-          } else {
-            throw new Error('Contract not initialized for registration.');
-          }
-        } catch (registerError) {
-          console.error('Failed to register user on blockchain:', registerError);
-          throw new Error('Failed to register on blockchain: ' + registerError.message);
-        }
+        // Throw error to stop the waste reporting process
+        throw new Error('Blockchain registration required. Please complete registration first.');
       }
 
       // Double-check registration status before proceeding
@@ -1089,7 +1265,11 @@ export const EcoConnectProvider = ({ children }) => {
       setLoading(true);
       if (!wasteVanContract) throw new Error("Contract not initialized");
       if (!isRegistered || !isAgent) throw new Error("Not registered as an agent");
-      if (agentStatus !== AgentStatus.Approved) throw new Error("Agent not approved");
+      // Check agent status - handle both numeric (from blockchain) and string (from backend) values
+      if (agentStatus !== AgentStatus.Approved && agentStatus !== 'approved') {
+        console.log('Agent status check failed:', { agentStatus, AgentStatusApproved: AgentStatus.Approved });
+        throw new Error("Agent not approved");
+      }
 
       const tx = await wasteVanContract.collectWaste(qrCodeHash);
       await tx.wait();
@@ -1107,7 +1287,11 @@ export const EcoConnectProvider = ({ children }) => {
       setLoading(true);
       if (!wasteVanContract) throw new Error("Contract not initialized");
       if (!isRegistered || !isAgent) throw new Error("Not registered as an agent");
-      if (agentStatus !== AgentStatus.Approved) throw new Error("Agent not approved");
+      // Check agent status - handle both numeric (from blockchain) and string (from backend) values
+      if (agentStatus !== AgentStatus.Approved && agentStatus !== 'approved') {
+        console.log('Agent status check failed:', { agentStatus, AgentStatusApproved: AgentStatus.Approved });
+        throw new Error("Agent not approved");
+      }
 
       const tx = await wasteVanContract.processWaste(reportId);
       await tx.wait();
@@ -1186,6 +1370,157 @@ export const EcoConnectProvider = ({ children }) => {
     }
   };
 
+  // Get the current point cost from the contract
+  const getPointCost = async () => {
+    try {
+      if (!wasteVanContract) throw new Error("Contract not initialized");
+
+      const pointCost = await wasteVanContract.pointCost();
+      return pointCost;
+    } catch (error) {
+      console.error("Failed to get point cost:", error);
+      throw error;
+    }
+  };
+
+  // Purchase points for agents
+  const purchasePoints = async (ethAmount) => {
+    try {
+      console.log('purchasePoints called with ethAmount:', ethAmount);
+      setLoading(true);
+
+      if (!wasteVanContract) {
+        console.error('Contract not initialized');
+        throw new Error("Contract not initialized");
+      }
+
+      console.log('Agent status check:', { isAgent, agentStatus });
+
+      // Check if user is an agent
+      if (!isAgent) {
+        console.error('User is not an agent');
+        throw new Error("Not an agent");
+      }
+
+      // Check agent approval status
+      console.log('Agent status:', agentStatus, 'AgentStatus.Approved:', AgentStatus.Approved);
+
+      // Handle both numeric and string status values
+      const isApproved =
+        agentStatus === AgentStatus.Approved ||
+        agentStatus === 'approved' ||
+        (typeof agentStatus === 'string' && agentStatus.toLowerCase() === 'approved') ||
+        (typeof agentStatus === 'number' && agentStatus === 1);
+
+      if (!isApproved) {
+        console.error('Agent not approved. Current status:', agentStatus);
+        throw new Error("Agent not approved");
+      }
+
+      console.log('Agent is approved, proceeding with purchase');
+
+      // Convert ETH amount to wei
+      const weiAmount = ethers.parseEther(ethAmount.toString());
+      console.log('Converted ETH amount to wei:', weiAmount.toString());
+
+      // Check if contract interface is available
+      if (wasteVanContract && wasteVanContract.interface && wasteVanContract.interface.functions) {
+        console.log('Contract methods:', Object.keys(wasteVanContract.interface.functions));
+      } else {
+        console.log('Contract interface not fully initialized');
+      }
+
+      // Call the contract function
+      console.log('Calling contract.purchasePoints with value:', weiAmount.toString());
+
+      // Check if the purchasePoints function exists
+      if (!wasteVanContract || typeof wasteVanContract.purchasePoints !== 'function') {
+        console.error('purchasePoints function not found on contract', wasteVanContract);
+        throw new Error('Contract method not found. Please contact support.');
+      }
+
+      // Log contract details for debugging
+      console.log('Contract address:', await wasteVanContract.getAddress());
+      console.log('Current account:', currentAccount);
+
+      try {
+        // Attempt to call the contract method
+        console.log('Sending transaction with value:', ethers.formatEther(weiAmount), 'ETH');
+
+        // Force a fresh connection to ensure MetaMask popup appears
+        if (window.ethereum) {
+          console.log('Refreshing connection to MetaMask...');
+          await window.ethereum.request({ method: 'eth_requestAccounts' });
+        }
+
+        // Make sure we're using the signer for transactions
+        if (!signer) {
+          console.error('Signer not available');
+          throw new Error('Wallet connection issue. Please reconnect your wallet.');
+        }
+
+        // Get contract with signer to ensure transaction is sent properly
+        const contractWithSigner = wasteVanContract.connect(signer);
+        console.log('Contract connected with signer');
+
+        // Send the transaction with explicit gas settings to ensure MetaMask popup
+        const tx = await contractWithSigner.purchasePoints({
+          value: weiAmount,
+          gasLimit: 300000, // Explicit gas limit
+        });
+
+        console.log('Transaction sent:', tx.hash);
+
+        // Alert the user that the transaction has been sent
+        alert('Transaction sent! Please wait for confirmation.');
+
+        console.log('Waiting for transaction confirmation...');
+        const receipt = await tx.wait();
+        console.log('Transaction confirmed:', receipt);
+
+        // Calculate the points purchased based on the transaction value
+        const pointAmountBigInt = weiAmount / pointCost;
+        console.log(`Points purchased (BigInt): ${pointAmountBigInt.toString()}`);
+
+        // Convert BigInt to string then to number safely
+        const pointAmount = Number(pointAmountBigInt.toString());
+        console.log(`Points purchased: ${pointAmount} (${ethers.formatEther(weiAmount)} ETH / ${ethers.formatEther(pointCost)} ETH per point)`);
+
+        // Alert the user about the successful purchase
+        alert(`Successfully purchased ${pointAmount} points!`);
+      } catch (txError) {
+        console.error('Transaction error:', txError);
+        // Check for specific error types
+        if (txError.code === 'ACTION_REJECTED') {
+          throw new Error('Transaction rejected in wallet');
+        } else if (txError.code === 'INSUFFICIENT_FUNDS') {
+          throw new Error('Insufficient funds in your wallet');
+        } else if (txError.message && txError.message.includes('user rejected')) {
+          throw new Error('Transaction rejected by user');
+        } else if (txError.message && txError.message.includes('execution reverted')) {
+          // Extract the revert reason if available
+          const revertReason = txError.message.includes('reverted:')
+            ? txError.message.split('reverted:')[1].trim()
+            : 'Transaction reverted by the contract';
+          throw new Error(`Transaction failed: ${revertReason}`);
+        } else {
+          throw txError; // Re-throw if it's another type of error
+        }
+      }
+
+      // Refresh agent stats
+      const updatedStats = await getAgentStats(currentAccount);
+      console.log('Updated agent stats:', updatedStats);
+
+      return true;
+    } catch (error) {
+      console.error("Failed to purchase points:", error);
+      throw error;
+    } finally {
+      setLoading(false);
+    }
+  };
+
   return (
     <>
       <EcoConnectContext.Provider
@@ -1210,14 +1545,20 @@ export const EcoConnectProvider = ({ children }) => {
           reportWaste,
           collectWaste,
           processWaste,
+          purchasePoints,
           getWasteReportsByStatus,
           getUserTokenBalance,
           getAgentStats,
+          getPointCost,
           login,
           logout,
           registerWithBackend,
           showInsufficientFundsModal,
-          setShowInsufficientFundsModal
+          setShowInsufficientFundsModal,
+          showRegistrationRequiredModal,
+          setShowRegistrationRequiredModal,
+          showAgentApprovalNotification,
+          setShowAgentApprovalNotification
         }}
       >
         {children}
@@ -1227,6 +1568,18 @@ export const EcoConnectProvider = ({ children }) => {
           isOpen={showInsufficientFundsModal}
           onClose={() => setShowInsufficientFundsModal(false)}
           walletAddress={currentAccount}
+        />
+
+        {/* Registration Required Modal */}
+        <RegistrationRequiredModal
+          isOpen={showRegistrationRequiredModal}
+          onClose={() => setShowRegistrationRequiredModal(false)}
+        />
+
+        {/* Agent Approval Notification */}
+        <AgentApprovalNotification
+          isOpen={showAgentApprovalNotification}
+          onClose={() => setShowAgentApprovalNotification(false)}
         />
       </EcoConnectContext.Provider>
     </>

@@ -3,12 +3,15 @@
 import React, { useState, useEffect, useContext } from 'react';
 import { Loader2, Coins, BarChart3, QrCode, AlertCircle } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Button } from '@/components/ui/button';
 import { EcoConnectContext } from '@/context/EcoConnect';
 import { ethers } from 'ethers';
 import { AgentStatus } from '@/context/Constants';
 import CollectWasteForm from './CollectWasteForm';
 import ProcessWasteForm from './ProcessWasteForm';
+import PurchasePointsForm from './PurchasePointsForm';
 import RecentWasteReports from './RecentWasteReports';
+import WasteReportsList from '../shared/WasteReportsList';
 import { useRouter } from 'next/navigation';
 
 export default function AgentDashboard() {
@@ -24,9 +27,10 @@ export default function AgentDashboard() {
 
   const [stats, setStats] = useState(null);
   const [loading, setLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState('collect');
+  const [activeTab, setActiveTab] = useState('pending');
   const [contractError, setContractError] = useState(false);
   const [isMounted, setIsMounted] = useState(false);
+  const [refreshTrigger, setRefreshTrigger] = useState(0); // Used to trigger refreshes
 
   // Handle client-side only code
   useEffect(() => {
@@ -98,7 +102,7 @@ export default function AgentDashboard() {
     if (isMounted) {
       fetchAgentData();
     }
-  }, [currentAccount, wasteVanContract, isAgent, agentStatus, getAgentStats, connectWallet, isMounted]);
+  }, [currentAccount, wasteVanContract, isAgent, agentStatus, getAgentStats, connectWallet, isMounted, refreshTrigger]);
 
   if (!isAgent) {
     return (
@@ -111,7 +115,34 @@ export default function AgentDashboard() {
     );
   }
 
-  if (agentStatus !== AgentStatus.Approved) {
+  // Function to handle waste collection and point purchase updates
+  const handleWasteCollected = (reportId) => {
+    console.log(`Waste collected with ID: ${reportId}`);
+    // Trigger a refresh of the agent dashboard data
+    setRefreshTrigger(prev => prev + 1);
+  };
+
+  // Function to handle point purchase updates
+  const handlePointsPurchased = () => {
+    console.log('Points purchased, refreshing data...');
+    // Trigger a refresh of the agent dashboard data
+    setRefreshTrigger(prev => prev + 1);
+
+    // Fetch agent stats immediately to update the UI
+    if (wasteVanContract && currentAccount && isAgent) {
+      getAgentStats(currentAccount)
+        .then(updatedStats => {
+          console.log('Updated agent stats after point purchase:', updatedStats);
+          setStats(updatedStats);
+        })
+        .catch(error => {
+          console.error('Failed to fetch updated agent stats:', error);
+        });
+    }
+  };
+
+  // Check agent status - handle both numeric (from blockchain) and string (from backend) values
+  if (agentStatus !== AgentStatus.Approved && agentStatus !== 'approved') {
     return (
       <div className="text-center py-12">
         <h1 className="text-2xl font-bold mb-4">Pending Approval</h1>
@@ -179,6 +210,17 @@ export default function AgentDashboard() {
                     </p>
                   </div>
                 </div>
+                <div className="mt-4">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="w-full border-yellow-500 text-yellow-600 hover:bg-yellow-50"
+                    onClick={() => setActiveTab('points')}
+                  >
+                    <Coins className="h-4 w-4 mr-2" />
+                    Purchase More Points
+                  </Button>
+                </div>
               </CardContent>
             </Card>
 
@@ -202,7 +244,7 @@ export default function AgentDashboard() {
             </Card>
 
             {/* Recent Waste Reports with Notifications */}
-            <RecentWasteReports />
+            <RecentWasteReports onWasteCollected={handleWasteCollected} />
 
             <Card>
               <CardHeader className="pb-2">
@@ -225,26 +267,42 @@ export default function AgentDashboard() {
           </div>
 
           {/* Tab Navigation */}
-          <div className="flex space-x-2 mb-6">
+          <div className="flex flex-wrap space-x-2 mb-6">
+            <button
+              onClick={() => setActiveTab('pending')}
+              className={`px-4 py-2 rounded-md mb-2 ${activeTab === 'pending' ? 'bg-green-600 text-white' : 'bg-gray-100'}`}
+            >
+              Pending Reports
+            </button>
             <button
               onClick={() => setActiveTab('collect')}
-              className={`px-4 py-2 rounded-md ${activeTab === 'collect' ? 'bg-green-600 text-white' : 'bg-gray-100'}`}
+              className={`px-4 py-2 rounded-md mb-2 ${activeTab === 'collect' ? 'bg-green-600 text-white' : 'bg-gray-100'}`}
             >
               Collect Waste
             </button>
             <button
               onClick={() => setActiveTab('process')}
-              className={`px-4 py-2 rounded-md ${activeTab === 'process' ? 'bg-green-600 text-white' : 'bg-gray-100'}`}
+              className={`px-4 py-2 rounded-md mb-2 ${activeTab === 'process' ? 'bg-green-600 text-white' : 'bg-gray-100'}`}
             >
               Process Waste
+            </button>
+            <button
+              onClick={() => setActiveTab('points')}
+              className={`px-4 py-2 rounded-md mb-2 ${activeTab === 'points' ? 'bg-green-600 text-white' : 'bg-gray-100'}`}
+            >
+              Purchase Points
             </button>
           </div>
 
           {/* Tab Content */}
+          {activeTab === 'pending' && (
+            <WasteReportsList onWasteCollected={handleWasteCollected} isAgent={true} />
+          )}
+
           {activeTab === 'collect' && (
             <Card>
               <CardContent className="p-6">
-                <CollectWasteForm />
+                <CollectWasteForm onWasteCollected={handleWasteCollected} />
               </CardContent>
             </Card>
           )}
@@ -252,7 +310,15 @@ export default function AgentDashboard() {
           {activeTab === 'process' && (
             <Card>
               <CardContent className="p-6">
-                <ProcessWasteForm />
+                <ProcessWasteForm onWasteProcessed={handleWasteCollected} />
+              </CardContent>
+            </Card>
+          )}
+
+          {activeTab === 'points' && (
+            <Card>
+              <CardContent className="p-6">
+                <PurchasePointsForm onPointsPurchased={handlePointsPurchased} />
               </CardContent>
             </Card>
           )}

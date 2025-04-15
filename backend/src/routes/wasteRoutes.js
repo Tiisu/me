@@ -26,6 +26,7 @@ router.post('/report', authMiddleware, reportWasteValidation, wasteController.re
 router.get('/reports', authMiddleware, wasteController.getWasteReports);
 router.get('/reports/:id', authMiddleware, wasteController.getWasteReportById);
 router.get('/qrcode/:hash', authMiddleware, wasteController.getQRCode);
+router.get('/check-reports', authMiddleware, wasteController.checkReportsExist); // New endpoint
 
 // Routes for agents only
 router.post('/collect/:id', authMiddleware, agentMiddleware, wasteController.collectWaste);

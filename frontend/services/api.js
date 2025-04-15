@@ -136,8 +136,16 @@ export const wasteService = {
   },
 
   getWasteReports: async (params = {}) => {
-    const response = await api.get('/waste/reports', { params });
-    return response.data;
+    try {
+      console.log('Calling getWasteReports API with params:', params);
+      const response = await api.get('/waste/reports', { params });
+      console.log('getWasteReports API response:', response.data);
+      return response.data;
+    } catch (error) {
+      console.error('Error in getWasteReports:', error);
+      console.error('Error details:', error.response?.data || error.message);
+      throw error;
+    }
   },
 
   getWasteReportById: async (id) => {
@@ -160,6 +168,18 @@ export const wasteService = {
   getNearbyWasteReports: async (params) => {
     const response = await api.get('/waste/nearby', { params });
     return response.data;
+  },
+
+  checkReportsExist: async () => {
+    try {
+      console.log('Checking if any waste reports exist...');
+      const response = await api.get('/waste/check-reports');
+      console.log('Check reports response:', response.data);
+      return response.data;
+    } catch (error) {
+      console.error('Error checking reports:', error);
+      throw error;
+    }
   }
 };
 

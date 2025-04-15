@@ -15,12 +15,13 @@ export default function NotificationBell() {
   // Fetch notification count on mount and every 30 seconds
   useEffect(() => {
     fetchNotificationCount();
-    
+
     // Set up polling for new notifications
     const interval = setInterval(() => {
+      console.log('Checking for new notifications...');
       fetchNotificationCount();
-    }, 30000); // 30 seconds
-    
+    }, 15000); // 15 seconds
+
     return () => clearInterval(interval);
   }, []);
 
@@ -34,7 +35,14 @@ export default function NotificationBell() {
   const fetchNotificationCount = async () => {
     try {
       const response = await api.notification.getNotificationCount();
+      console.log('Notification count response:', response);
       setUnreadCount(response.unreadCount);
+
+      // If we have unread notifications, fetch them immediately
+      if (response.unreadCount > 0) {
+        console.log(`Found ${response.unreadCount} unread notifications, fetching details...`);
+        fetchNotifications();
+      }
     } catch (error) {
       console.error('Failed to fetch notification count:', error);
     }
@@ -43,7 +51,9 @@ export default function NotificationBell() {
   const fetchNotifications = async () => {
     try {
       setLoading(true);
-      const response = await api.notification.getNotifications({ limit: 5 });
+      console.log('Fetching notifications for dropdown...');
+      const response = await api.notification.getNotifications({ limit: 10 });
+      console.log('Notifications response:', response);
       setNotifications(response.notifications);
     } catch (error) {
       console.error('Failed to fetch notifications:', error);
@@ -56,10 +66,10 @@ export default function NotificationBell() {
     try {
       await api.notification.markAsRead([notificationId]);
       // Update the notification in the list
-      setNotifications(prev => 
-        prev.map(notification => 
-          notification._id === notificationId 
-            ? { ...notification, read: true } 
+      setNotifications(prev =>
+        prev.map(notification =>
+          notification._id === notificationId
+            ? { ...notification, read: true }
             : notification
         )
       );
@@ -74,7 +84,7 @@ export default function NotificationBell() {
     try {
       await api.notification.markAllAsRead();
       // Update all notifications in the list
-      setNotifications(prev => 
+      setNotifications(prev =>
         prev.map(notification => ({ ...notification, read: true }))
       );
       // Reset unread count
@@ -88,7 +98,7 @@ export default function NotificationBell() {
     try {
       await api.notification.deleteNotification(notificationId);
       // Remove the notification from the list
-      setNotifications(prev => 
+      setNotifications(prev =>
         prev.filter(notification => notification._id !== notificationId)
       );
       // Update unread count if needed
@@ -121,7 +131,7 @@ export default function NotificationBell() {
           </span>
         )}
       </Button>
-      
+
       {isOpen && (
         <NotificationDropdown
           notifications={notifications}

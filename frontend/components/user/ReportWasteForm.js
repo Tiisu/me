@@ -10,7 +10,7 @@ import { EcoConnectContext } from '@/context/EcoConnect';
 import { PlasticType } from '@/context/Constants';
 import api from '@/services/api';
 
-export default function ReportWasteForm() {
+export default function ReportWasteForm({ onWasteReported }) {
   const {
     reportWaste,
     loading: contextLoading,
@@ -312,6 +312,32 @@ export default function ReportWasteForm() {
       setImagePreview([]);
       if (fileInputRef.current) {
         fileInputRef.current.value = '';
+      }
+
+      // Notify parent component about the waste report
+      if (onWasteReported) {
+        console.log('Calling onWasteReported callback');
+
+        // Add a slight delay to allow the backend to process the report
+        setTimeout(async () => {
+          console.log('Delayed refresh after waste report submission');
+
+          // Check if reports exist in the database
+          try {
+            const result = await api.waste.checkReportsExist();
+            console.log('Reports check after submission:', result);
+
+            if (result.hasReports) {
+              console.log(`Database has ${result.totalReports} reports after submission`);
+            } else {
+              console.error('WARNING: No reports found in database after submission!');
+            }
+          } catch (error) {
+            console.error('Error checking reports after submission:', error);
+          }
+
+          onWasteReported();
+        }, 2000);
       }
 
     } catch (error) {

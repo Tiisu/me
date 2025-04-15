@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Users, Award, Trash2, Settings, CheckCircle, XCircle, RefreshCw, Eye, Search, Filter, Clock, FileText, Truck, Recycle, User, Calendar, Mail } from 'lucide-react';
+import WasteReportsList from '@/components/shared/WasteReportsList';
 import {
   Table,
   TableBody,
@@ -17,6 +18,7 @@ import {
 import api from '@/services/api';
 import { useRouter } from 'next/navigation';
 import { formatDistanceToNow } from 'date-fns';
+import AgentApprovalNotification from '@/components/shared/AgentApprovalNotification';
 
 export default function AdminDashboard() {
   const router = useRouter();
@@ -58,6 +60,8 @@ export default function AdminDashboard() {
   const [isSystemPaused, setIsSystemPaused] = useState(false);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
+  const [showApprovalNotification, setShowApprovalNotification] = useState(false);
+  const [refreshTrigger, setRefreshTrigger] = useState(0); // Used to trigger refreshes
 
   // Handle admin login
   const handleLogin = async (e) => {
@@ -112,7 +116,7 @@ export default function AdminDashboard() {
 
     // Clean up interval on unmount
     return () => clearInterval(interval);
-  }, [selectedTab, isAdmin]);
+  }, [selectedTab, isAdmin, refreshTrigger]);
 
   // Fetch data based on selected tab
   useEffect(() => {
@@ -254,6 +258,17 @@ export default function AdminDashboard() {
       fetchPendingAgents();
 
       setSuccess('Agent approved successfully');
+
+      // Show approval notification
+      setShowApprovalNotification(true);
+
+      // Hide notification after 5 seconds
+      setTimeout(() => {
+        setShowApprovalNotification(false);
+      }, 5000);
+
+      // Trigger a refresh of the dashboard data
+      setRefreshTrigger(prev => prev + 1);
     } catch (error) {
       console.error('Failed to approve agent:', error);
       setError('Failed to approve agent: ' + (error.message || 'Unknown error'));
@@ -263,6 +278,16 @@ export default function AdminDashboard() {
   };
 
   // Reject agent
+  // Function to handle waste collection updates
+  const handleWasteCollected = (reportId) => {
+    console.log(`Waste collected with ID: ${reportId}`);
+    // Refresh waste reports
+    fetchWasteReports();
+    // Refresh dashboard data
+    fetchDashboardData();
+    setRefreshTrigger(prev => prev + 1);
+  };
+
   const handleRejectAgent = async (agentId) => {
     try {
       setAgentActionLoading(agentId);
@@ -276,6 +301,9 @@ export default function AdminDashboard() {
       fetchPendingAgents();
 
       setSuccess('Agent rejected successfully');
+
+      // Trigger a refresh of the dashboard data
+      setRefreshTrigger(prev => prev + 1);
     } catch (error) {
       console.error('Failed to reject agent:', error);
       setError('Failed to reject agent: ' + (error.message || 'Unknown error'));
@@ -376,7 +404,14 @@ export default function AdminDashboard() {
 
   // Show admin dashboard if authenticated
   return (
-    <div className="p-6 max-w-7xl mx-auto">
+    <>
+      {/* Agent Approval Notification */}
+      <AgentApprovalNotification
+        isOpen={showApprovalNotification}
+        onClose={() => setShowApprovalNotification(false)}
+      />
+
+      <div className="p-6 max-w-7xl mx-auto">
       {/* Header */}
       <div className="flex justify-between items-center mb-8">
         <div>
@@ -460,7 +495,7 @@ export default function AdminDashboard() {
 
       {/* Tab Navigation */}
       <div className="flex flex-wrap space-x-2 mb-6">
-        {['overview', 'agents', 'collections', 'users', 'settings'].map((tab) => (
+        {['overview', 'waste-reports', 'agents', 'collections', 'users', 'settings'].map((tab) => (
           <Button
             key={tab}
             variant={selectedTab === tab ? "default" : "outline"}
@@ -475,6 +510,13 @@ export default function AdminDashboard() {
       {/* Tab Content */}
       <Card className="w-full">
         <CardContent className="p-6">
+          {selectedTab === 'waste-reports' && (
+            <div className="space-y-6">
+              <h2 className="text-xl font-semibold mb-4">All Waste Reports</h2>
+              <WasteReportsList isAgent={false} onWasteCollected={handleWasteCollected} />
+            </div>
+          )}
+
           {selectedTab === 'overview' && (
             <div className="space-y-6">
               <h2 className="text-xl font-semibold mb-4">System Overview</h2>
@@ -955,6 +997,7 @@ export default function AdminDashboard() {
         </CardContent>
       </Card>
     </div>
+    </>
   );
 }
 

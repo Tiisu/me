@@ -61,6 +61,17 @@ const reportWaste = async (req, res) => {
     const qrCodeDataUrl = await QRCode.toDataURL(qrCodeHash);
 
     // Create new waste report
+    console.log('Creating new waste report with data:', {
+      userId,
+      plasticType,
+      quantity,
+      qrCodeHash,
+      status: 'reported',
+      location: location ? 'provided' : 'not provided',
+      images: images ? images.length : 0,
+      walletAddress: walletAddress || 'not provided'
+    });
+
     const wasteReport = new WasteReport({
       user: userId,
       plasticType,
@@ -74,7 +85,17 @@ const reportWaste = async (req, res) => {
       walletAddress: walletAddress || null
     });
 
-    await wasteReport.save();
+    // Save the report and ensure it's properly saved
+    const savedReport = await wasteReport.save();
+    console.log('Waste report saved successfully with ID:', savedReport._id);
+
+    // Double-check that the report was saved by fetching it again
+    const verifiedReport = await WasteReport.findById(savedReport._id);
+    if (verifiedReport) {
+      console.log('Verified report exists in database with ID:', verifiedReport._id);
+    } else {
+      console.error('WARNING: Could not verify report was saved! This is a critical error.');
+    }
 
     // If user has wallet connected, report on blockchain
     const user = await User.findById(userId);
@@ -116,8 +137,9 @@ const reportWaste = async (req, res) => {
 
     // Create notifications for agents about the new waste report
     try {
-      await createWasteReportNotifications(wasteReport, user);
-      console.log('Waste report notifications created successfully');
+      console.log('Attempting to create waste report notifications for report:', wasteReport._id);
+      const notifications = await createWasteReportNotifications(wasteReport, user);
+      console.log(`Waste report notifications created successfully: ${notifications.length} notifications`);
     } catch (notificationError) {
       console.error('Failed to create waste report notifications:', notificationError);
       // Continue even if notification creation fails
@@ -139,7 +161,13 @@ const reportWaste = async (req, res) => {
  */
 const getWasteReports = async (req, res) => {
   try {
-    const { status, plasticType, limit = 10, page = 1 } = req.query;
+    console.log('getWasteReports called with query:', req.query);
+    const { status, plasticType, limit = 10, page = 1, _t } = req.query;
+
+    // Log if this is a force refresh request
+    if (_t) {
+      console.log('Force refresh requested at:', new Date(_t * 1));
+    }
 
     // Build query
     const query = {};
@@ -148,21 +176,38 @@ const getWasteReports = async (req, res) => {
     if (status) query.status = status;
     if (plasticType) query.plasticType = plasticType;
 
+    console.log('Built query:', query);
+
     // Calculate pagination
     const skip = (parseInt(page) - 1) * parseInt(limit);
 
     // Find waste reports
+    console.log('Executing query with pagination:', { skip, limit });
+
+    // Use lean() for faster query execution and to ensure we're not getting cached data
     const reports = await WasteReport.find(query)
       .populate('user', 'username email walletAddress')
       .populate('assignedAgent', 'username email walletAddress')
       .sort({ createdAt: -1 })
       .limit(parseInt(limit))
-      .skip(skip);
+      .skip(skip)
+      .lean(); // Convert to plain JavaScript objects
+
+    console.log(`Found ${reports.length} waste reports`);
+    if (reports.length > 0) {
+      console.log('First report:', {
+        id: reports[0]._id,
+        status: reports[0].status,
+        plasticType: reports[0].plasticType,
+        createdAt: reports[0].createdAt
+      });
+    }
 
     // Count total reports
     const total = await WasteReport.countDocuments(query);
+    console.log(`Total reports matching query: ${total}`);
 
-    res.json({
+    const response = {
       reports,
       pagination: {
         total,
@@ -170,7 +215,10 @@ const getWasteReports = async (req, res) => {
         limit: parseInt(limit),
         pages: Math.ceil(total / parseInt(limit))
       }
-    });
+    };
+
+    console.log('Sending response with pagination:', response.pagination);
+    res.json(response);
   } catch (error) {
     console.error('Get waste reports error:', error);
     res.status(500).json({ message: 'Server error' });
@@ -419,6 +467,47 @@ const getNearbyWasteReports = async (req, res) => {
   }
 };
 
+/**
+ * Check if any waste reports exist
+ */
+const checkReportsExist = async (req, res) => {
+  try {
+    console.log('Checking if any waste reports exist');
+
+    // Count total reports
+    const totalReports = await WasteReport.countDocuments();
+    console.log(`Total reports in database: ${totalReports}`);
+
+    // Get the most recent report for debugging
+    const latestReport = await WasteReport.findOne().sort({ createdAt: -1 }).lean();
+
+    if (latestReport) {
+      console.log('Latest report:', {
+        id: latestReport._id,
+        status: latestReport.status,
+        plasticType: latestReport.plasticType,
+        createdAt: latestReport.createdAt
+      });
+    } else {
+      console.log('No reports found in the database');
+    }
+
+    res.json({
+      success: true,
+      totalReports,
+      hasReports: totalReports > 0,
+      latestReport: latestReport ? {
+        id: latestReport._id,
+        status: latestReport.status,
+        createdAt: latestReport.createdAt
+      } : null
+    });
+  } catch (error) {
+    console.error('Check reports exist error:', error);
+    res.status(500).json({ message: 'Server error' });
+  }
+};
+
 module.exports = {
   reportWaste,
   getWasteReports,
@@ -426,5 +515,6 @@ module.exports = {
   getQRCode,
   collectWaste,
   processWaste,
-  getNearbyWasteReports
+  getNearbyWasteReports,
+  checkReportsExist
 };
